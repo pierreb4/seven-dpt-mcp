@@ -1,0 +1,22 @@
+{
+  "name": "seven-dpt-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Feynman twelve-problems MCP server, driven by the tripartite model of inspiration (evocation, transcendence, approach motivation).",
+  "bin": {
+    "seven-dpt-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}
