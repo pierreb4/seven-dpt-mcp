@@ -1,15 +1,43 @@
 {
   "name": "seven-dpt-mcp",
   "version": "0.1.0",
-  "private": true,
-  "type": "module",
   "description": "Feynman twelve-problems MCP server, driven by the tripartite model of inspiration (evocation, transcendence, approach motivation).",
+  "mcpName": "io.github.pierreb4/seven-dpt-mcp",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "Pierre Baume <pierreb4@users.noreply.github.com>",
+  "homepage": "https://github.com/pierreb4/seven-dpt-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pierreb4/seven-dpt-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pierreb4/seven-dpt-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "agent-memory",
+    "feynman",
+    "twelve-problems",
+    "productivity",
+    "ideation",
+    "reasoning"
+  ],
   "bin": {
     "seven-dpt-mcp": "dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

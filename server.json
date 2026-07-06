@@ -1,0 +1,29 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pierreb4/seven-dpt-mcp",
+  "description": "Feynman's twelve-problems method as an MCP server: dormant problems + an evoke loop for new tricks.",
+  "repository": {
+    "url": "https://github.com/pierreb4/seven-dpt-mcp",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "seven-dpt-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "SEVEN_DPT_DB",
+          "description": "Optional path to the JSON store (default: ~/.local/share/seven-dpt/store.json)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

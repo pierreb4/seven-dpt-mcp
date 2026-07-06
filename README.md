@@ -48,33 +48,43 @@ into a Pandora's-Box / Gittins reservation-value ranking — but it **gates on d
 refuses to emit numbers until enough resolved sparks (with cost + value, *including failures*)
 accrue, so the policy is never fit on false precision.
 
-## Install (build once, then turn on for all projects)
+## Install (turn on for all projects)
+
+### Via npm (recommended)
+
+Published on npm — no build step. Register it for every project (user scope):
+
+```bash
+claude mcp add --scope user seven-dpt -- npx -y seven-dpt-mcp
+```
+
+### From source (alternative)
 
 ```bash
 npm install && npm run build
-```
-
-```bash
-# Register the server for every project (user scope). Use an ABSOLUTE node path —
-# hooks and MCP servers don't source your shell profile, so nvm-style setups need one:
+# Register for every project (user scope). Use an ABSOLUTE node path — hooks and MCP
+# servers don't source your shell profile, so nvm-style setups need one:
 claude mcp add --scope user seven-dpt -- "$(command -v node)" "$(pwd)/dist/index.js"
 ```
 
 Then make the problems **ambient** — merge into `~/.claude/settings.json` so every
-session opens with your dormant problems in context (replace both placeholders with
-absolute paths; on nvm setups `node` must be absolute here too):
+session opens with your dormant problems in context:
 
 ```jsonc
 {
   "hooks": {
     "SessionStart": [
-      { "matcher": "startup", "hooks": [{ "type": "command", "command": "/absolute/path/to/node /absolute/path/to/seven-dpt-mcp/dist/index.js --digest", "timeout": 10 }] },
-      { "matcher": "resume",  "hooks": [{ "type": "command", "command": "/absolute/path/to/node /absolute/path/to/seven-dpt-mcp/dist/index.js --digest", "timeout": 10 }] },
-      { "matcher": "clear",   "hooks": [{ "type": "command", "command": "/absolute/path/to/node /absolute/path/to/seven-dpt-mcp/dist/index.js --digest", "timeout": 10 }] }
+      { "matcher": "startup", "hooks": [{ "type": "command", "command": "npx -y seven-dpt-mcp --digest", "timeout": 10 }] },
+      { "matcher": "resume",  "hooks": [{ "type": "command", "command": "npx -y seven-dpt-mcp --digest", "timeout": 10 }] },
+      { "matcher": "clear",   "hooks": [{ "type": "command", "command": "npx -y seven-dpt-mcp --digest", "timeout": 10 }] }
     ]
   }
 }
 ```
+
+(Installed from source instead? Replace each command with an absolute node path +
+`/absolute/path/to/seven-dpt-mcp/dist/index.js --digest` — hooks don't source your shell
+profile, so nvm-style setups need the absolute path.)
 
 (`--digest` prints nothing when no problems are open; a fresh install prints the five
 seeded ones — that's the bootstrap working, not noise.)

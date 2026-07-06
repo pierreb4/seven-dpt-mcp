@@ -1,0 +1,13 @@
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+#
+# seven-dpt is a LOCAL stdio server: it runs on the user's own machine and keeps a local
+# JSON store, so it is listed to run via npx — not hosted, no Docker image. Smithery starts
+# it over stdio (to introspect its tools and for local installs) with the command below.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties: {}
+  commandFunction:
+    |-
+    (config) => ({ command: 'npx', args: ['-y', 'seven-dpt-mcp'] })
