@@ -160,6 +160,17 @@ export function getProblem(id: number): { problem: Problem; sparks: Spark[] } | 
   return { problem, sparks };
 }
 
+// Sparks acted on (status past `pending`) but never given a graded `value` — the reward
+// channel left half-open. Surfaced in the ambient digest so they get closed out: an
+// ungraded outcome (especially an unlogged failure) is exactly what leaves problem #2's
+// spend-policy unlearnable, since every allocator method consumes this same cost/value history.
+export function sparksAwaitingGrade(): Spark[] {
+  const db = load();
+  return db.sparks
+    .filter((s) => s.value === null && s.status !== "pending")
+    .sort((a, b) => a.id - b.id);
+}
+
 export function addProblem(input: {
   title: string;
   statement?: string;

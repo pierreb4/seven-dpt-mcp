@@ -1,6 +1,6 @@
 {
   "name": "seven-dpt-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Feynman twelve-problems MCP server, driven by the tripartite model of inspiration (evocation, transcendence, approach motivation).",
   "mcpName": "io.github.pierreb4/seven-dpt-mcp",
   "type": "module",

@@ -7,6 +7,7 @@ import {
   captureSpark,
   getProblem,
   listProblems,
+  sparksAwaitingGrade,
   storePath,
   updateSpark,
   type Problem,
@@ -52,12 +53,23 @@ function evocationScaffold(trick: string, problems: Problem[]): string {
 // every session — the substrate that lets unrelated work spark an old problem.
 function buildDigest(): string {
   const problems = listProblems(false);
-  if (problems.length === 0) return ""; // print nothing rather than add noise to context
-  const lines = problems.map((p) => `  #${p.id} ${p.title}`).join("\n");
-  return [
-    "[seven-dpt] Your dormant problems — if anything this session bears on one, run the `evoke` tool with the trick/insight and `capture_spark` any genuine hit:",
-    lines,
-  ].join("\n");
+  const ungraded = sparksAwaitingGrade();
+  if (problems.length === 0 && ungraded.length === 0) return ""; // print nothing rather than add noise
+  const blocks: string[] = [];
+  if (problems.length > 0) {
+    const lines = problems.map((p) => `  #${p.id} ${p.title}`).join("\n");
+    blocks.push(
+      "[seven-dpt] Your dormant problems — if anything this session bears on one, run the `evoke` tool with the trick/insight and `capture_spark` any genuine hit:\n" +
+        lines,
+    );
+  }
+  if (ungraded.length > 0) {
+    const ids = ungraded.map((s) => `#${s.id}`).join(", ");
+    blocks.push(
+      `[seven-dpt] ${ungraded.length} spark(s) acted on but not yet graded (${ids}) — close the reward channel with update_spark(id, status, cost, value). Log failures too (value 0); the zero-value outcomes are exactly what problem #2's spend-policy is learned from.`,
+    );
+  }
+  return blocks.join("\n\n");
 }
 
 if (process.argv.includes("--digest")) {
@@ -66,7 +78,7 @@ if (process.argv.includes("--digest")) {
   process.exit(0);
 }
 
-const server = new McpServer({ name: "seven-dpt", version: "0.1.0" });
+const server = new McpServer({ name: "seven-dpt", version: "0.1.1" });
 
 server.registerTool(
   "add_problem",
