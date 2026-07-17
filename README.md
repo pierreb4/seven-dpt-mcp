@@ -21,8 +21,8 @@ runs inside the server, no API key.
 | `list_problems` | See your open problems |
 | `get_problem` | One problem + every spark (idea, next step, outcome) — the memory |
 | `evoke` | **The loop.** Feed it a trick; returns your problems + a scaffold walking evocation → transcendence → approach |
-| `capture_spark` | Persist a candidate idea + concrete next step against a problem (+ an optional `cost` estimate) |
-| `update_spark` | Record a spark's outcome — status (tried/worked/failed), `cost` (effort spent), `value` (graded payoff, `0` for a miss). **Log failures too**; the zero-value outcomes are the signal a background-effort policy is learned from |
+| `capture_spark` | Persist a candidate idea + concrete next step against a problem (+ an optional `costToOpen` — the forward effort estimate) |
+| `update_spark` | Record a spark's outcome — status (tried/worked/failed), `cost` (actual effort spent), `value` (graded payoff, `0` for a miss). **Log failures too**; the zero-value outcomes are the signal a background-effort policy is learned from |
 
 Storage: `~/.local/share/seven-dpt/store.json` (override with `SEVEN_DPT_DB`). One store,
 shared by every project = one brain.
@@ -42,11 +42,14 @@ The *policy* for how/when/how-much to chase background problems is deliberately 
 coded — it's meant to be learned later from the accumulated `spark → outcome` history,
 which is why `update_spark` exists.
 
-That history is the **reward channel**: each spark carries a `cost` (effort to a verdict) and,
-once resolved, a `value` (graded payoff, `0` for a miss). `analysis/reservation_value.py` turns it
-into a Pandora's-Box / Gittins reservation-value ranking — but it **gates on data sufficiency** and
-refuses to emit numbers until enough resolved sparks (with cost + value, *including failures*)
-accrue, so the policy is never fit on false precision.
+That history is the **reward channel**: each spark carries a `costToOpen` (the forward effort estimate,
+set at capture and preserved), a `cost` (the actual effort, once chased to a verdict), and a `value`
+(graded payoff, `0` for a miss). `analysis/reservation_value.py` turns it into a Pandora's-Box / Gittins
+reservation-value ranking — but it **gates on data sufficiency** and refuses to emit numbers until enough
+resolved sparks (with cost + value, *including failures*) accrue, so the policy is never fit on false
+precision. A companion, `analysis/reservation_value_bayes.py`, adds a posterior-predictive prior (so it
+can rank under sparse data) and models the one-time `costToOpen` against a compounding-but-saturating
+benefit stream — ranking by profitability index, which is invariant to the value↔cost exchange rate.
 
 ## Install (turn on for all projects)
 

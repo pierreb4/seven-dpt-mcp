@@ -136,8 +136,8 @@ server.registerTool(
           .map(
             (s) =>
               `  • [spark #${s.id} · ${s.status}] ${s.idea}\n      next: ${s.nextStep}` +
-              (s.cost !== null || s.value !== null
-                ? `\n      cost: ${s.cost ?? "?"} · value: ${s.value ?? "?"}`
+              (s.costToOpen !== null || s.cost !== null || s.value !== null
+                ? `\n      cost-to-open: ${s.costToOpen ?? "?"} · actual cost: ${s.cost ?? "?"} · value: ${s.value ?? "?"}`
                 : "") +
               (s.outcome ? `\n      outcome: ${s.outcome}` : "") +
               `\n      (evoked by: ${s.trick})`,
@@ -178,20 +178,25 @@ server.registerTool(
       trick: z.string().describe("The trick / stimulus that evoked it"),
       idea: z.string().describe("The candidate solution or insight"),
       nextStep: z.string().describe("ONE concrete next experiment or action"),
-      cost: z
+      costToOpen: z
         .number()
         .optional()
         .describe(
-          "Rough EXPECTED effort to chase this spark to a verdict, on a consistent scale (e.g. minutes, or a 1-5 effort score). The budget model's cost term — an estimate is fine; refine it on update_spark once you know the actual.",
+          "Rough EXPECTED effort to chase this spark to a verdict, on a consistent scale (e.g. minutes, or a 1-5 effort score). This is the Pandora 'cost to open' the spend-policy ranks on — the a-priori estimate is PRESERVED even after update_spark records the actual spend (unlike `cost`, which it refines).",
         ),
+      cost: z
+        .number()
+        .optional()
+        .describe("Legacy alias for costToOpen at capture time (kept for older callers). Prefer costToOpen."),
     },
   },
-  async ({ problemId, trick, idea, nextStep, cost }) => {
-    const spark = captureSpark({ problemId, trick, idea, nextStep, cost });
+  async ({ problemId, trick, idea, nextStep, costToOpen, cost }) => {
+    const spark = captureSpark({ problemId, trick, idea, nextStep, costToOpen, cost });
     if (!spark)
       return { content: [{ type: "text", text: `No problem #${problemId}; spark not saved.` }], isError: true };
+    const co = spark.costToOpen !== null ? ` · cost-to-open ${spark.costToOpen}` : "";
     return {
-      content: [{ type: "text", text: `Captured spark #${spark.id} on problem #${problemId}.\nNext step: ${nextStep}` }],
+      content: [{ type: "text", text: `Captured spark #${spark.id} on problem #${problemId}${co}.\nNext step: ${nextStep}` }],
     };
   },
 );
@@ -209,10 +214,16 @@ server.registerTool(
         .enum(["pending", "tried", "worked", "failed"])
         .optional()
         .describe("New status for the spark"),
+      costToOpen: z
+        .number()
+        .optional()
+        .describe(
+          "Revise the FORWARD cost-to-open estimate (uncommon — normally set once at capture). Resolution never changes it automatically.",
+        ),
       cost: z
         .number()
         .optional()
-        .describe("ACTUAL effort spent chasing it to a verdict (same scale as capture's cost)."),
+        .describe("ACTUAL effort spent chasing it to a verdict (same scale as capture's estimate)."),
       value: z
         .number()
         .optional()
@@ -221,8 +232,8 @@ server.registerTool(
         ),
     },
   },
-  async ({ id, outcome, status, cost, value }) => {
-    const spark = updateSpark({ id, outcome, status, cost, value });
+  async ({ id, outcome, status, costToOpen, cost, value }) => {
+    const spark = updateSpark({ id, outcome, status, costToOpen, cost, value });
     if (!spark) return { content: [{ type: "text", text: `No spark #${id}.` }], isError: true };
     const bits = [`status=${spark.status}`];
     if (spark.cost !== null) bits.push(`cost=${spark.cost}`);
