@@ -80,7 +80,7 @@ if (process.argv.includes("--digest")) {
   process.exit(0);
 }
 
-const server = new McpServer({ name: "seven-dpt", version: "0.1.1" });
+const server = new McpServer({ name: "seven-dpt", version: "0.1.2" });
 
 server.registerTool(
   "add_problem",
