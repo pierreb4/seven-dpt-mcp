@@ -9,6 +9,7 @@ import {
   listProblems,
   sparksAwaitingGrade,
   storePath,
+  updateProblem,
   updateSpark,
   type Problem,
 } from "./store.js";
@@ -16,7 +17,8 @@ import {
 function fmtProblem(p: Problem): string {
   const tags = p.tags.length ? ` [${p.tags.join(", ")}]` : "";
   const stmt = p.statement ? `\n    ${p.statement}` : "";
-  return `#${p.id} (${p.status})${tags} — ${p.title}${stmt}`;
+  const res = p.resolution ? `\n    resolution: ${p.resolution}` : "";
+  return `#${p.id} (${p.status})${tags} — ${p.title}${stmt}${res}`;
 }
 
 // The theory lives here. evoke() returns this to the connected model so *it* runs
@@ -91,12 +93,50 @@ server.registerTool(
       statement: z.string().optional().describe("Fuller description / what 'solved' would look like"),
       tags: z.array(z.string()).optional().describe("Freeform tags, e.g. domains or project names"),
       origin: z.string().optional().describe("Where it came from (project, context)"),
+      overCap: z
+        .boolean()
+        .optional()
+        .describe(
+          "Override the ~twelve-problem cap for this add (only after weighing a retire/merge first — the cap is the method)",
+        ),
     },
   },
-  async ({ title, statement, tags, origin }) => {
-    const { problem, warning } = addProblem({ title, statement, tags, origin });
+  async ({ title, statement, tags, origin, overCap }) => {
+    const { problem, warning, blocked } = addProblem({ title, statement, tags, origin, overCap });
+    if (!problem) return { content: [{ type: "text", text: blocked ?? "Not added." }], isError: true };
     const head = `Added #${problem.id}: ${problem.title}`;
     return { content: [{ type: "text", text: warning ? `${warning}\n\n${head}` : head }] };
+  },
+);
+
+server.registerTool(
+  "update_problem",
+  {
+    title: "Update / retire / solve a problem",
+    description:
+      "Edit a problem or move it out of the active set — the retire/solve/merge loop that keeps the set near twelve. When closing (status solved/retired), write a resolution saying WHY plus, for a retirement, the explicit RE-OPEN trigger: a retired problem is parked with a wake condition, not deleted. A merge is a retirement whose resolution names the absorbing problem. Reopen later by setting status back to open.",
+    inputSchema: {
+      id: z.number().int().describe("Problem id"),
+      title: z.string().optional().describe("New short name"),
+      statement: z.string().optional().describe("New fuller description"),
+      framing: z.string().optional().describe("New framing (the 'instance of what?' reframe)"),
+      status: z
+        .enum(["open", "solved", "retired"])
+        .optional()
+        .describe("open (reopen) | solved | retired"),
+      resolution: z
+        .string()
+        .optional()
+        .describe(
+          "Why it left the open set + the re-open trigger (write one whenever closing; for a merge, name the absorbing problem)",
+        ),
+      tags: z.array(z.string()).optional().describe("Replace the tag list"),
+    },
+  },
+  async ({ id, title, statement, framing, status, resolution, tags }) => {
+    const problem = updateProblem({ id, title, statement, framing, status, resolution, tags });
+    if (!problem) return { content: [{ type: "text", text: `No problem #${id}.` }], isError: true };
+    return { content: [{ type: "text", text: `Updated:\n${fmtProblem(problem)}` }] };
   },
 );
 

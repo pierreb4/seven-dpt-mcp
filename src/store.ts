@@ -11,6 +11,10 @@ export interface Problem {
   statement: string;
   framing: string;
   status: ProblemStatus;
+  // Why the problem left the open set — and, for a retirement, the explicit RE-OPEN trigger.
+  // A retired problem is parked with a wake condition, not deleted; a merge is a retirement
+  // whose resolution names the absorbing problem. null while open.
+  resolution: string | null;
   tags: string[];
   origin: string | null;
   createdAt: string;
@@ -48,7 +52,8 @@ interface DB {
   sparks: Spark[];
 }
 
-// Feynman kept "about a dozen." The cap is advisory in this MVP — we warn, not block.
+// Feynman kept "about a dozen." Adding beyond the cap is refused until something is
+// retired/solved/merged (update_problem) — or explicitly overridden with overCap.
 export const SOFT_CAP = 12;
 
 export function storePath(): string {
@@ -108,6 +113,7 @@ function seededDB(): DB {
       statement: s.statement,
       framing: "",
       status: "open",
+      resolution: null,
       tags: s.tags,
       origin: "ships with seven-dpt (its own open problems — edit or retire freely)",
       createdAt: ts,
@@ -125,7 +131,11 @@ function load(): DB {
   try {
     const db = JSON.parse(readFileSync(path, "utf8")) as Partial<DB>;
     const merged = { ...emptyDB(), ...db } as DB;
-    // Backfill the reward-channel fields on sparks written before they existed.
+    // Backfill fields written before they existed.
+    merged.problems = merged.problems.map((p) => ({
+      ...p,
+      resolution: p.resolution ?? null,
+    }));
     merged.sparks = merged.sparks.map((s) => ({
       ...s,
       costToOpen: s.costToOpen ?? null,
@@ -182,8 +192,25 @@ export function addProblem(input: {
   statement?: string;
   tags?: string[];
   origin?: string;
-}): { problem: Problem; warning?: string } {
+  overCap?: boolean;
+}): { problem: Problem | null; warning?: string; blocked?: string } {
   const db = load();
+  const open = db.problems.filter((p) => p.status === "open");
+  // The cap is the method: the set only works if it stays small enough to keep live in mind.
+  if (open.length >= SOFT_CAP && !input.overCap) {
+    const stalest = [...open]
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+      .slice(0, 3)
+      .map((p) => `#${p.id} ${p.title} (last touched ${p.updatedAt.slice(0, 10)})`)
+      .join("\n  ");
+    return {
+      problem: null,
+      blocked:
+        `Not added: ${open.length} problems are already open and Feynman's cap is ~${SOFT_CAP}. ` +
+        `Retire, solve, or merge one first (update_problem) — stalest candidates:\n  ${stalest}\n` +
+        `Or pass overCap: true if this one genuinely earns an over-cap slot.`,
+    };
+  }
   const ts = now();
   const problem: Problem = {
     id: db.nextProblemId++,
@@ -191,6 +218,7 @@ export function addProblem(input: {
     statement: input.statement ?? "",
     framing: "",
     status: "open",
+    resolution: null,
     tags: input.tags ?? [],
     origin: input.origin ?? null,
     createdAt: ts,
@@ -199,12 +227,34 @@ export function addProblem(input: {
   db.problems.push(problem);
   save(db);
 
-  const openCount = db.problems.filter((p) => p.status === "open").length;
   const warning =
-    openCount > SOFT_CAP
-      ? `You now have ${openCount} open problems. Feynman kept about ${SOFT_CAP} so they stay live in mind — consider consolidating or retiring some.`
+    open.length + 1 > SOFT_CAP
+      ? `You now have ${open.length + 1} open problems (cap ~${SOFT_CAP}, overridden). Retire or merge soon — the set only works if it stays live in mind.`
       : undefined;
   return { problem, warning };
+}
+
+export function updateProblem(input: {
+  id: number;
+  title?: string;
+  statement?: string;
+  framing?: string;
+  status?: ProblemStatus;
+  resolution?: string;
+  tags?: string[];
+}): Problem | null {
+  const db = load();
+  const problem = db.problems.find((p) => p.id === input.id);
+  if (!problem) return null;
+  if (input.title !== undefined) problem.title = input.title;
+  if (input.statement !== undefined) problem.statement = input.statement;
+  if (input.framing !== undefined) problem.framing = input.framing;
+  if (input.status !== undefined) problem.status = input.status;
+  if (input.resolution !== undefined) problem.resolution = input.resolution;
+  if (input.tags !== undefined) problem.tags = input.tags;
+  problem.updatedAt = now();
+  save(db);
+  return problem;
 }
 
 export function captureSpark(input: {

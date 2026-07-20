@@ -17,7 +17,8 @@ runs inside the server, no API key.
 
 | Tool | Purpose |
 |------|---------|
-| `add_problem` | Add a long-running problem to your set |
+| `add_problem` | Add a long-running problem to your set (refused past the ~12 cap until you retire/merge something — or pass `overCap`) |
+| `update_problem` | Edit, **retire**, **solve**, or reopen a problem. Closing takes a `resolution` — why, plus the re-open trigger; a merge is a retirement whose resolution names the absorber |
 | `list_problems` | See your open problems |
 | `get_problem` | One problem + every spark (idea, next step, outcome) — the memory |
 | `evoke` | **The loop.** Feed it a trick; returns your problems + a scaffold walking evocation → transcendence → approach |
@@ -103,8 +104,6 @@ seeded ones — that's the bootstrap working, not noise.)
 ## Known MVP limits (intentional)
 
 - JSON file, last-write-wins (fine for one user).
-- No `retire`/`solve`/`update_problem` yet — the 12-cap only warns. (Tracked as one of
-  seven-dpt's own seeded problems.)
 - `evoke` matching is done by the connected model, not pre-ranked by embeddings.
 
 ## License
