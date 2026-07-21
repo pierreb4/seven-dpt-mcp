@@ -32,6 +32,10 @@ export interface Spark {
   // Reward channel — the signal a spend-policy (problem #2) is learned from. Without these,
   // "how much to spend on background problems" is unlearnable by any method (Gittins/market/RL
   // all consume the same history). null until logged.
+  // Stated p(works) at capture — the calibration channel: once enough sparks resolve, compare
+  // stated priors to realized outcomes and de-bias. IMMUTABLE by design: update_spark never
+  // touches it, because a post-hoc revision would let hindsight contaminate exactly that audit.
+  prior: number | null;
   // FORWARD estimate of the effort to chase this spark to a verdict, set at capture and PRESERVED:
   // update_spark refines `cost` to the realized spend but never touches this. It is the Pandora/
   // Gittins "cost to open the box" the spend-policy ranks on — kept separate so resolving a spark
@@ -138,6 +142,7 @@ function load(): DB {
     }));
     merged.sparks = merged.sparks.map((s) => ({
       ...s,
+      prior: s.prior ?? null,
       costToOpen: s.costToOpen ?? null,
       cost: s.cost ?? null,
       value: s.value ?? null,
@@ -262,6 +267,7 @@ export function captureSpark(input: {
   trick: string;
   idea: string;
   nextStep: string;
+  prior?: number;
   costToOpen?: number;
   cost?: number;
 }): Spark | null {
@@ -277,6 +283,7 @@ export function captureSpark(input: {
     nextStep: input.nextStep,
     outcome: null,
     status: "pending",
+    prior: input.prior ?? null,
     // The a-priori estimate IS the forward cost-to-open; keep it in its own field so a later
     // update_spark that refines `cost` to the realized spend can't destroy it. Accept the legacy
     // `cost` arg as the estimate too, for callers written before costToOpen existed.
@@ -306,6 +313,8 @@ export function updateSpark(input: {
   if (!spark) return null;
   if (input.outcome !== undefined) spark.outcome = input.outcome;
   if (input.status !== undefined) spark.status = input.status;
+  // `prior` is deliberately NOT accepted here: stated-at-capture credences are immutable,
+  // or the calibration audit they exist for would be contaminated by hindsight.
   // costToOpen is the forward estimate — revisable before resolution, but resolution never
   // auto-touches it (that is the whole point of keeping it separate from `cost`).
   if (input.costToOpen !== undefined) spark.costToOpen = input.costToOpen;

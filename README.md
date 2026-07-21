@@ -22,7 +22,7 @@ runs inside the server, no API key.
 | `list_problems` | See your open problems |
 | `get_problem` | One problem + every spark (idea, next step, outcome) — the memory |
 | `evoke` | **The loop.** Feed it a trick; returns your problems + a scaffold walking evocation → transcendence → approach |
-| `capture_spark` | Persist a candidate idea + concrete next step against a problem (+ an optional `costToOpen` — the forward effort estimate) |
+| `capture_spark` | Persist a candidate idea + concrete next step against a problem (+ optional `costToOpen` — the forward effort estimate — and `prior` — your stated p(works), immutable, for later calibration) |
 | `update_spark` | Record a spark's outcome — status (tried/worked/failed), `cost` (actual effort spent), `value` (graded payoff, `0` for a miss). **Log failures too**; the zero-value outcomes are the signal a background-effort policy is learned from |
 
 Storage: `~/.local/share/seven-dpt/store.json` (override with `SEVEN_DPT_DB`). One store,
@@ -43,8 +43,10 @@ The *policy* for how/when/how-much to chase background problems is deliberately 
 coded — it's meant to be learned later from the accumulated `spark → outcome` history,
 which is why `update_spark` exists.
 
-That history is the **reward channel**: each spark carries a `costToOpen` (the forward effort estimate,
-set at capture and preserved), a `cost` (the actual effort, once chased to a verdict), and a `value`
+That history is the **reward channel**: each spark carries a `prior` (your stated probability-it-works
+at capture — immutable afterwards, so stated credences can be calibrated against realized outcomes
+once enough sparks resolve), a `costToOpen` (the forward effort estimate, set at capture and
+preserved), a `cost` (the actual effort, once chased to a verdict), and a `value`
 (graded payoff, `0` for a miss). `analysis/reservation_value.py` turns it into a Pandora's-Box / Gittins
 reservation-value ranking — but it **gates on data sufficiency** and refuses to emit numbers until enough
 resolved sparks (with cost + value, *including failures*) accrue, so the policy is never fit on false

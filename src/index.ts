@@ -176,8 +176,8 @@ server.registerTool(
           .map(
             (s) =>
               `  • [spark #${s.id} · ${s.status}] ${s.idea}\n      next: ${s.nextStep}` +
-              (s.costToOpen !== null || s.cost !== null || s.value !== null
-                ? `\n      cost-to-open: ${s.costToOpen ?? "?"} · actual cost: ${s.cost ?? "?"} · value: ${s.value ?? "?"}`
+              (s.prior !== null || s.costToOpen !== null || s.cost !== null || s.value !== null
+                ? `\n      ${s.prior !== null ? `prior: ${s.prior} · ` : ""}cost-to-open: ${s.costToOpen ?? "?"} · actual cost: ${s.cost ?? "?"} · value: ${s.value ?? "?"}`
                 : "") +
               (s.outcome ? `\n      outcome: ${s.outcome}` : "") +
               `\n      (evoked by: ${s.trick})`,
@@ -218,6 +218,14 @@ server.registerTool(
       trick: z.string().describe("The trick / stimulus that evoked it"),
       idea: z.string().describe("The candidate solution or insight"),
       nextStep: z.string().describe("ONE concrete next experiment or action"),
+      prior: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe(
+          "Your honest stated probability (0-1) at capture that chasing this spark yields a worked outcome. IMMUTABLE afterwards — update_spark cannot revise it — so stated credences can later be calibrated against realized outcomes. State what you believe, not what sounds good; the audit compares.",
+        ),
       costToOpen: z
         .number()
         .optional()
@@ -230,13 +238,14 @@ server.registerTool(
         .describe("Legacy alias for costToOpen at capture time (kept for older callers). Prefer costToOpen."),
     },
   },
-  async ({ problemId, trick, idea, nextStep, costToOpen, cost }) => {
-    const spark = captureSpark({ problemId, trick, idea, nextStep, costToOpen, cost });
+  async ({ problemId, trick, idea, nextStep, prior, costToOpen, cost }) => {
+    const spark = captureSpark({ problemId, trick, idea, nextStep, prior, costToOpen, cost });
     if (!spark)
       return { content: [{ type: "text", text: `No problem #${problemId}; spark not saved.` }], isError: true };
+    const pr = spark.prior !== null ? ` · prior ${spark.prior}` : "";
     const co = spark.costToOpen !== null ? ` · cost-to-open ${spark.costToOpen}` : "";
     return {
-      content: [{ type: "text", text: `Captured spark #${spark.id} on problem #${problemId}${co}.\nNext step: ${nextStep}` }],
+      content: [{ type: "text", text: `Captured spark #${spark.id} on problem #${problemId}${pr}${co}.\nNext step: ${nextStep}` }],
     };
   },
 );
