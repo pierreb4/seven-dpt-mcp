@@ -5,20 +5,92 @@ import { z } from "zod";
 import {
   addProblem,
   captureSpark,
+  evaluateWake,
   getProblem,
   listProblems,
   sparksAwaitingGrade,
   storePath,
   updateProblem,
   updateSpark,
+  wakeLedger,
   type Problem,
+  type WakeCondition,
+  type WakeEntry,
 } from "./store.js";
+
+// ---- wake-condition schema (0.1.4): the machine half of a re-open trigger ----
+// Pure-read signals only (store counters, dates, files) — no shell, no network — so the
+// package stays portable and user-specific paths live in user DATA, never in code.
+const gteSchema = z.number().positive().describe("Threshold — the atom is ripe when current >= gte");
+const wakeAtomSchema = z.discriminatedUnion("signal", [
+  z.object({ signal: z.literal("sparkCount"), gte: gteSchema }),
+  z.object({ signal: z.literal("resolvedSparkCount"), gte: gteSchema }),
+  z.object({ signal: z.literal("openProblemCount"), gte: gteSchema }),
+  z.object({
+    signal: z.literal("date"),
+    onOrAfter: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD"),
+  }),
+  z.object({ signal: z.literal("fileLines"), path: z.string(), gte: gteSchema }),
+  z.object({ signal: z.literal("fileMatches"), path: z.string(), pattern: z.string(), gte: gteSchema }),
+  z.object({ signal: z.literal("fileCount"), dir: z.string(), suffix: z.string().optional(), gte: gteSchema }),
+  z.object({ signal: z.literal("manual"), note: z.string() }),
+]);
+const wakeConditionSchema = z
+  .object({
+    summary: z.string().describe("One-line human statement of the trigger"),
+    all: z
+      .array(wakeAtomSchema)
+      .min(1)
+      .optional()
+      .describe(
+        "Ripe when EVERY atom is ripe. A `manual` atom here means: once the numeric atoms are ripe, surface as 'manual check due' instead of auto-firing.",
+      ),
+    any: z.array(wakeAtomSchema).min(1).optional().describe("Ripe when AT LEAST ONE atom is ripe"),
+  })
+  .refine((c) => (c.all ? 1 : 0) + (c.any ? 1 : 0) === 1, {
+    message: "Provide exactly one of all/any",
+  });
+
+function wakeLabel(e: WakeEntry): string {
+  return e.kind === "problem" ? `problem #${e.id}` : `spark #${e.id}`;
+}
+
+function truncate(s: string, n: number): string {
+  const one = s.replace(/\s+/g, " ").trim();
+  return one.length <= n ? one : one.slice(0, n - 1) + "…";
+}
+
+function pctOf(p: number | null): string {
+  return p === null ? "" : ` ${Math.round(p * 100)}%`;
+}
+
+function fmtWakeEntry(e: WakeEntry): string {
+  const r = e.readout;
+  return [
+    `${wakeLabel(e)} [${r.state}${pctOf(r.progress)}] — ${e.summary}`,
+    `    atoms: ${r.atoms.map((a) => `[${a.state}] ${a.echo}`).join(" · ")}`,
+    `    ${e.kind === "problem" ? "title" : "next"}: ${truncate(e.context, 140)}`,
+  ].join("\n");
+}
+
+// Echoed at ARM time: a wrong aim (path, suffix, unit) must be visible now, not at wake time.
+function fmtWakeArmed(cond: WakeCondition): string {
+  const r = evaluateWake(cond);
+  return `wake armed [${r.state}${pctOf(r.progress)}]: ${r.atoms
+    .map((a) => `[${a.state}] ${a.echo}`)
+    .join(" · ")}`;
+}
 
 function fmtProblem(p: Problem): string {
   const tags = p.tags.length ? ` [${p.tags.join(", ")}]` : "";
   const stmt = p.statement ? `\n    ${p.statement}` : "";
   const res = p.resolution ? `\n    resolution: ${p.resolution}` : "";
-  return `#${p.id} (${p.status})${tags} — ${p.title}${stmt}${res}`;
+  let wake = "";
+  if (p.wakeCondition) {
+    const r = evaluateWake(p.wakeCondition);
+    wake = `\n    wake [${r.state}${pctOf(r.progress)}]: ${r.binding}`;
+  }
+  return `#${p.id} (${p.status})${tags} — ${p.title}${stmt}${res}${wake}`;
 }
 
 // The theory lives here. evoke() returns this to the connected model so *it* runs
@@ -56,7 +128,6 @@ function evocationScaffold(trick: string, problems: Problem[]): string {
 function buildDigest(): string {
   const problems = listProblems(false);
   const ungraded = sparksAwaitingGrade();
-  if (problems.length === 0 && ungraded.length === 0) return ""; // print nothing rather than add noise
   const blocks: string[] = [];
   if (problems.length > 0) {
     const lines = problems.map((p) => `  #${p.id} ${p.title}`).join("\n");
@@ -71,7 +142,72 @@ function buildDigest(): string {
       `[seven-dpt] ${ungraded.length} spark(s) acted on but not yet graded (${ids}) — close the reward channel with update_spark(id, status, cost, value). Log failures too (value 0); the zero-value outcomes are exactly what problem #2's spend-policy is learned from.`,
     );
   }
-  return blocks.join("\n\n");
+  blocks.push(...buildWakeBlocks());
+  return blocks.join("\n\n"); // "" when nothing to say — the print-nothing rule holds
+}
+
+// The wake sections of the digest: ripe entries always, broken aims always, plus one
+// compact ripening line (top 3 by progress) so approach is visible before arrival.
+function buildWakeBlocks(): string[] {
+  const entries = wakeLedger();
+  if (entries.length === 0) return [];
+  const blocks: string[] = [];
+
+  const act = entries.filter((e) => e.readout.state === "ripe" || e.readout.state === "manual-gate");
+  if (act.length > 0) {
+    const lines = act.map((e) => {
+      const what =
+        e.readout.state === "manual-gate"
+          ? `manual check due — ${e.readout.atoms
+              .filter((a) => a.state === "manual")
+              .map((a) => a.echo.replace(/^manual: /, ""))
+              .join("; ")}`
+          : `${e.readout.atoms
+              .filter((a) => a.state === "ripe")
+              .map((a) => a.echo)
+              .join(" · ")} ✓`;
+      const action =
+        e.kind === "problem"
+          ? `reopen with update_problem(${e.id}, status: "open") — or re-aim its wakeCondition`
+          : `act on: ${truncate(e.context, 120)} — or re-park with update_spark(${e.id}, wakeCondition: …)`;
+      return `  ${wakeLabel(e)} — ${e.summary} · ${what}\n    → ${action}`;
+    });
+    blocks.push(`[seven-dpt] WAKE — ripe, act or re-park:\n${lines.join("\n")}`);
+  }
+
+  const unreadable = entries.filter((e) => e.readout.atoms.some((a) => a.state === "unreadable"));
+  if (unreadable.length > 0) {
+    const lines = unreadable.map(
+      (e) =>
+        `  ${wakeLabel(e)} · ${e.readout.atoms
+          .filter((a) => a.state === "unreadable")
+          .map((a) => a.echo)
+          .join(" · ")}`,
+    );
+    blocks.push(`[seven-dpt] wake source unreadable — fix the aim:\n${lines.join("\n")}`);
+  }
+
+  const ripening = entries
+    .filter((e) => e.readout.state === "ripening" && e.readout.progress !== null)
+    .slice(0, 3); // wakeLedger is already sorted by progress within the state
+  if (ripening.length > 0) {
+    const bits = ripening.map((e) => {
+      const pct = e.readout.progress! > 0 ? ` (${Math.round(e.readout.progress! * 100)}%)` : "";
+      return `${wakeLabel(e)} ${e.readout.binding}${pct}`;
+    });
+    blocks.push(`[seven-dpt] ripening: ${bits.join(" · ")}`);
+  }
+  return blocks;
+}
+
+// Non-MCP CLI mode: `--wake` prints the full wake ledger (every parked entry, every atom
+// echo) and exits — ops parity with wake_status for timers or hands-on checks.
+if (process.argv.includes("--wake")) {
+  const entries = wakeLedger();
+  process.stdout.write(
+    entries.length > 0 ? entries.map(fmtWakeEntry).join("\n") + "\n" : "No wake conditions set.\n",
+  );
+  process.exit(0);
 }
 
 if (process.argv.includes("--digest")) {
@@ -128,15 +264,39 @@ server.registerTool(
         .string()
         .optional()
         .describe(
-          "Why it left the open set + the re-open trigger (write one whenever closing; for a merge, name the absorbing problem)",
+          "Why it left the open set + the re-open trigger in prose (write one whenever closing; for a merge, name the absorbing problem)",
         ),
       tags: z.array(z.string()).optional().describe("Replace the tag list"),
+      wakeCondition: wakeConditionSchema
+        .nullable()
+        .optional()
+        .describe(
+          "Structured, COMPUTABLE re-open trigger — the machine half of the resolution prose. The ambient digest evaluates it every session and surfaces ripeness (see wake_status). Parked problems only; pass null to clear; reopening always clears it.",
+        ),
     },
   },
-  async ({ id, title, statement, framing, status, resolution, tags }) => {
-    const problem = updateProblem({ id, title, statement, framing, status, resolution, tags });
+  async ({ id, title, statement, framing, status, resolution, tags, wakeCondition }) => {
+    // Wake conditions belong to PARKED problems — refuse loudly rather than store a
+    // condition the digest would evaluate against an active entry.
+    if (wakeCondition != null) {
+      const existing = getProblem(id);
+      if (!existing) return { content: [{ type: "text", text: `No problem #${id}.` }], isError: true };
+      if ((status ?? existing.problem.status) === "open")
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Problem #${id} is (or would stay) open — wake conditions belong to parked problems. Retire/solve it in the same call, or park a spark instead.`,
+            },
+          ],
+          isError: true,
+        };
+    }
+    const problem = updateProblem({ id, title, statement, framing, status, resolution, tags, wakeCondition });
     if (!problem) return { content: [{ type: "text", text: `No problem #${id}.` }], isError: true };
-    return { content: [{ type: "text", text: `Updated:\n${fmtProblem(problem)}` }] };
+    const armed =
+      wakeCondition != null && problem.wakeCondition ? `\n${fmtWakeArmed(problem.wakeCondition)}` : "";
+    return { content: [{ type: "text", text: `Updated:\n${fmtProblem(problem)}${armed}` }] };
   },
 );
 
@@ -236,16 +396,22 @@ server.registerTool(
         .number()
         .optional()
         .describe("Legacy alias for costToOpen at capture time (kept for older callers). Prefer costToOpen."),
+      wakeCondition: wakeConditionSchema
+        .optional()
+        .describe(
+          "Optional: park this spark behind a computable gate from birth (captured now, actionable when X) — the ambient digest evaluates it and surfaces ripeness.",
+        ),
     },
   },
-  async ({ problemId, trick, idea, nextStep, prior, costToOpen, cost }) => {
-    const spark = captureSpark({ problemId, trick, idea, nextStep, prior, costToOpen, cost });
+  async ({ problemId, trick, idea, nextStep, prior, costToOpen, cost, wakeCondition }) => {
+    const spark = captureSpark({ problemId, trick, idea, nextStep, prior, costToOpen, cost, wakeCondition });
     if (!spark)
       return { content: [{ type: "text", text: `No problem #${problemId}; spark not saved.` }], isError: true };
     const pr = spark.prior !== null ? ` · prior ${spark.prior}` : "";
     const co = spark.costToOpen !== null ? ` · cost-to-open ${spark.costToOpen}` : "";
+    const armed = spark.wakeCondition ? `\n${fmtWakeArmed(spark.wakeCondition)}` : "";
     return {
-      content: [{ type: "text", text: `Captured spark #${spark.id} on problem #${problemId}${pr}${co}.\nNext step: ${nextStep}` }],
+      content: [{ type: "text", text: `Captured spark #${spark.id} on problem #${problemId}${pr}${co}.${armed}\nNext step: ${nextStep}` }],
     };
   },
 );
@@ -279,16 +445,47 @@ server.registerTool(
         .describe(
           "Graded payoff of the outcome: 0 if it failed or yielded nothing, higher for bigger wins (heavy-tailed). The reward signal the budget policy is fit on — log it for failures too.",
         ),
+      wakeCondition: wakeConditionSchema
+        .nullable()
+        .optional()
+        .describe(
+          "Park a HOLD/STOPped spark with its computable re-run trigger — the digest owns the wait (see wake_status). Pass null to clear; resolving worked/failed auto-clears.",
+        ),
     },
   },
-  async ({ id, outcome, status, costToOpen, cost, value }) => {
-    const spark = updateSpark({ id, outcome, status, costToOpen, cost, value });
+  async ({ id, outcome, status, costToOpen, cost, value, wakeCondition }) => {
+    const spark = updateSpark({ id, outcome, status, costToOpen, cost, value, wakeCondition });
     if (!spark) return { content: [{ type: "text", text: `No spark #${id}.` }], isError: true };
     const bits = [`status=${spark.status}`];
     if (spark.cost !== null) bits.push(`cost=${spark.cost}`);
     if (spark.value !== null) bits.push(`value=${spark.value}`);
     const tail = spark.outcome ? `, outcome: ${spark.outcome}` : "";
-    return { content: [{ type: "text", text: `Updated spark #${spark.id}: ${bits.join(", ")}${tail}` }] };
+    const armed =
+      wakeCondition != null && spark.wakeCondition ? `\n${fmtWakeArmed(spark.wakeCondition)}` : "";
+    return { content: [{ type: "text", text: `Updated spark #${spark.id}: ${bits.join(", ")}${tail}${armed}` }] };
+  },
+);
+
+server.registerTool(
+  "wake_status",
+  {
+    title: "Wake-condition ledger",
+    description:
+      "Evaluate every parked problem/spark's wakeCondition right now: ripeness, progress, and current/target echoes per atom. Read-only. The ambient digest shows the compact version at session start; this is the full view for curation passes.",
+    inputSchema: {},
+  },
+  async () => {
+    const entries = wakeLedger();
+    if (entries.length === 0)
+      return {
+        content: [
+          {
+            type: "text",
+            text: "No wake conditions set. Park a problem (update_problem, when retiring/solving) or a spark (capture_spark / update_spark) with a wakeCondition — the digest then owns the wait.",
+          },
+        ],
+      };
+    return { content: [{ type: "text", text: entries.map(fmtWakeEntry).join("\n") }] };
   },
 );
 

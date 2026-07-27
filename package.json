@@ -29,7 +29,8 @@
     "seven-dpt-mcp": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/*.test.js"
   ],
   "engines": {
     "node": ">=18"
@@ -37,6 +38,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
+    "test": "npm run build && node --test dist/wake.test.js",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

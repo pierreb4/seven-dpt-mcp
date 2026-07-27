@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 export type ProblemStatus = "open" | "solved" | "retired";
 export type SparkStatus = "pending" | "tried" | "worked" | "failed";
@@ -15,6 +15,10 @@ export interface Problem {
   // A retired problem is parked with a wake condition, not deleted; a merge is a retirement
   // whose resolution names the absorbing problem. null while open.
   resolution: string | null;
+  // Structured, COMPUTABLE re-open trigger, evaluated by the ambient digest — the machine
+  // half of `resolution`'s prose trigger. Only parked (solved/retired) problems carry one;
+  // reopening clears it. null = no automatic wake (a permanent exclusion is a valid state).
+  wakeCondition: WakeCondition | null;
   tags: string[];
   origin: string | null;
   createdAt: string;
@@ -44,8 +48,53 @@ export interface Spark {
   cost: number | null; // effort to chase this spark to a verdict — refined to the ACTUAL on update_spark
   value: number | null; // graded payoff: 0 if it failed / yielded nothing, higher for bigger wins
   resolvedAt: string | null; // when status first reached worked/failed — for resolution lag
+  // Parked-spark re-run trigger (a probe STOPped/HOLD with a stated wake), evaluated by the
+  // digest like a problem's. Cleared automatically when the spark resolves worked/failed.
+  wakeCondition: WakeCondition | null;
   createdAt: string;
   updatedAt: string;
+}
+
+// ---------- wake conditions (0.1.4) ----------
+// A retired problem or parked spark carries a computable re-open trigger; the digest
+// evaluates every condition at session start, so the wait has a live owner instead of
+// "someone will remember." No auto-reopen: ripeness is surfaced, the model/human acts.
+
+export type WakeAtom =
+  | { signal: "sparkCount"; gte: number } // total sparks in the store
+  | { signal: "resolvedSparkCount"; gte: number } // sparks with a graded value
+  | { signal: "openProblemCount"; gte: number } // for cap-drift style triggers
+  | { signal: "date"; onOrAfter: string } // "YYYY-MM-DD" not-before gate (UTC)
+  | { signal: "fileLines"; path: string; gte: number } // non-empty lines in a file
+  | { signal: "fileMatches"; path: string; pattern: string; gte: number } // lines matching a JS regex
+  | { signal: "fileCount"; dir: string; suffix?: string; gte: number } // entries in a directory
+  | { signal: "manual"; note: string }; // never auto-ripens; carried for the human
+
+export interface WakeCondition {
+  summary: string; // one-line human statement of the trigger
+  all?: WakeAtom[]; // ripe when EVERY atom is ripe (exactly one of all/any, enforced at the tool edge)
+  any?: WakeAtom[]; // ripe when AT LEAST ONE atom is ripe
+}
+
+export interface AtomReadout {
+  echo: string; // human echo of aim + current/target ("sparks 28/50") — wrong aims must be visible
+  state: "ripe" | "ripening" | "manual" | "unreadable";
+  progress: number | null; // 0..1 for numeric atoms; null for manual/unreadable
+}
+
+export interface WakeReadout {
+  state: "ripe" | "ripening" | "manual-gate" | "unreadable";
+  progress: number | null;
+  binding: string; // compact echo of the deciding atom (weakest link for all, best for any)
+  atoms: AtomReadout[];
+}
+
+export interface WakeEntry {
+  kind: "problem" | "spark";
+  id: number;
+  context: string; // problem title / spark nextStep — the thing acting means doing
+  summary: string;
+  readout: WakeReadout;
 }
 
 interface DB {
@@ -118,6 +167,7 @@ function seededDB(): DB {
       framing: "",
       status: "open",
       resolution: null,
+      wakeCondition: null,
       tags: s.tags,
       origin: "ships with seven-dpt (its own open problems — edit or retire freely)",
       createdAt: ts,
@@ -139,6 +189,7 @@ function load(): DB {
     merged.problems = merged.problems.map((p) => ({
       ...p,
       resolution: p.resolution ?? null,
+      wakeCondition: p.wakeCondition ?? null,
     }));
     merged.sparks = merged.sparks.map((s) => ({
       ...s,
@@ -147,6 +198,7 @@ function load(): DB {
       cost: s.cost ?? null,
       value: s.value ?? null,
       resolvedAt: s.resolvedAt ?? null,
+      wakeCondition: s.wakeCondition ?? null,
     }));
     return merged;
   } catch {
@@ -224,6 +276,7 @@ export function addProblem(input: {
     framing: "",
     status: "open",
     resolution: null,
+    wakeCondition: null,
     tags: input.tags ?? [],
     origin: input.origin ?? null,
     createdAt: ts,
@@ -247,6 +300,7 @@ export function updateProblem(input: {
   status?: ProblemStatus;
   resolution?: string;
   tags?: string[];
+  wakeCondition?: WakeCondition | null;
 }): Problem | null {
   const db = load();
   const problem = db.problems.find((p) => p.id === input.id);
@@ -257,6 +311,10 @@ export function updateProblem(input: {
   if (input.status !== undefined) problem.status = input.status;
   if (input.resolution !== undefined) problem.resolution = input.resolution;
   if (input.tags !== undefined) problem.tags = input.tags;
+  if (input.wakeCondition !== undefined) problem.wakeCondition = input.wakeCondition;
+  // A wake condition belongs to a PARKED problem: whatever else this update did, an open
+  // problem carries none — so reopening auto-clears (parked -> active unparks the wait).
+  if (problem.status === "open") problem.wakeCondition = null;
   problem.updatedAt = now();
   save(db);
   return problem;
@@ -270,6 +328,7 @@ export function captureSpark(input: {
   prior?: number;
   costToOpen?: number;
   cost?: number;
+  wakeCondition?: WakeCondition;
 }): Spark | null {
   const db = load();
   const problem = db.problems.find((p) => p.id === input.problemId);
@@ -291,6 +350,9 @@ export function captureSpark(input: {
     cost: input.cost ?? null,
     value: null,
     resolvedAt: null,
+    // A spark can be born parked behind a gate (captured now, actionable when X) — the
+    // digest owns the wait from day one.
+    wakeCondition: input.wakeCondition ?? null,
     createdAt: ts,
     updatedAt: ts,
   };
@@ -307,6 +369,7 @@ export function updateSpark(input: {
   costToOpen?: number;
   cost?: number;
   value?: number;
+  wakeCondition?: WakeCondition | null;
 }): Spark | null {
   const db = load();
   const spark = db.sparks.find((s) => s.id === input.id);
@@ -320,11 +383,182 @@ export function updateSpark(input: {
   if (input.costToOpen !== undefined) spark.costToOpen = input.costToOpen;
   if (input.cost !== undefined) spark.cost = input.cost;
   if (input.value !== undefined) spark.value = input.value;
+  if (input.wakeCondition !== undefined) spark.wakeCondition = input.wakeCondition;
   // Stamp resolution time once, when the spark first reaches a terminal verdict (for lag).
   if ((spark.status === "worked" || spark.status === "failed") && spark.resolvedAt === null) {
     spark.resolvedAt = now();
   }
+  // Resolution unparks: a terminal verdict makes any wake condition moot (set-wake +
+  // resolve in one call therefore resolves — predictable over clever).
+  if (spark.status === "worked" || spark.status === "failed") spark.wakeCondition = null;
   spark.updatedAt = now();
   save(db);
   return spark;
+}
+
+// ---------- wake-condition evaluation ----------
+
+// The digest runs in a SessionStart hook — evaluation must stay fast, so file reads are
+// capped rather than streamed. Over-cap counts as unreadable: loud beats slow.
+const MAX_WAKE_FILE = 10 * 1024 * 1024;
+
+function expandPath(p: string): string {
+  return p.startsWith("~/") ? join(homedir(), p.slice(2)) : p;
+}
+
+function numAtom(label: string, current: number, target: number): AtomReadout {
+  return {
+    echo: `${label} ${current}/${target}`,
+    state: current >= target ? "ripe" : "ripening",
+    progress: Math.min(current / target, 1),
+  };
+}
+
+// An unreadable source must SCREAM, not sit at 0% forever — a wake condition whose file
+// vanished would otherwise be silence indistinguishable from "not ripe yet."
+function unreadableAtom(source: string, why: string): AtomReadout {
+  return { echo: `${source} → ${why}`, state: "unreadable", progress: null };
+}
+
+function readCapped(rawPath: string): { text: string } | { err: string } {
+  const path = expandPath(rawPath);
+  try {
+    if (statSync(path).size > MAX_WAKE_FILE) return { err: "exceeds 10 MB cap" };
+    return { text: readFileSync(path, "utf8") };
+  } catch (e) {
+    return { err: (e as NodeJS.ErrnoException).code ?? "unreadable" };
+  }
+}
+
+function evalAtom(atom: WakeAtom, db: DB): AtomReadout {
+  switch (atom.signal) {
+    case "sparkCount":
+      return numAtom("sparks", db.sparks.length, atom.gte);
+    case "resolvedSparkCount":
+      return numAtom("resolved sparks", db.sparks.filter((s) => s.value !== null).length, atom.gte);
+    case "openProblemCount":
+      return numAtom("open problems", db.problems.filter((p) => p.status === "open").length, atom.gte);
+    case "date": {
+      const open = now().slice(0, 10) >= atom.onOrAfter;
+      return {
+        echo: open ? `gate open since ${atom.onOrAfter}` : `gate ${atom.onOrAfter}`,
+        state: open ? "ripe" : "ripening",
+        progress: open ? 1 : 0,
+      };
+    }
+    case "fileLines": {
+      const r = readCapped(atom.path);
+      if ("err" in r) return unreadableAtom(atom.path, r.err);
+      const n = r.text.split("\n").filter((l) => l.length > 0).length;
+      return numAtom(basename(expandPath(atom.path)), n, atom.gte);
+    }
+    case "fileMatches": {
+      const r = readCapped(atom.path);
+      if ("err" in r) return unreadableAtom(atom.path, r.err);
+      let re: RegExp;
+      try {
+        re = new RegExp(atom.pattern);
+      } catch {
+        return unreadableAtom(atom.path, `invalid regex ${JSON.stringify(atom.pattern)}`);
+      }
+      const n = r.text.split("\n").filter((l) => re.test(l)).length;
+      return numAtom(basename(expandPath(atom.path)), n, atom.gte);
+    }
+    case "fileCount": {
+      const dir = expandPath(atom.dir);
+      try {
+        const n = readdirSync(dir).filter((f) => (atom.suffix ? f.endsWith(atom.suffix) : true)).length;
+        return numAtom(basename(dir), n, atom.gte);
+      } catch (e) {
+        return unreadableAtom(atom.dir, (e as NodeJS.ErrnoException).code ?? "unreadable");
+      }
+    }
+    case "manual":
+      return { echo: `manual: ${atom.note}`, state: "manual", progress: null };
+  }
+}
+
+function evalCondition(cond: WakeCondition, db: DB): WakeReadout {
+  const mode = cond.all ? "all" : "any";
+  const atoms = (cond.all ?? cond.any ?? []).map((a) => evalAtom(a, db));
+  const numeric = atoms.filter((a) => a.progress !== null);
+  const hasUnreadable = atoms.some((a) => a.state === "unreadable");
+  const hasManual = atoms.some((a) => a.state === "manual");
+
+  let state: WakeReadout["state"];
+  let bindingAtom: AtomReadout | undefined;
+  if (mode === "any") {
+    // Ripe when any atom fires; the binding echo is the ripe (else best-progress) atom.
+    bindingAtom = numeric.reduce<AtomReadout | undefined>(
+      (best, a) => (best === undefined || a.progress! > best.progress! ? a : best),
+      undefined,
+    );
+    const ripeAtom = atoms.find((a) => a.state === "ripe");
+    if (ripeAtom) {
+      state = "ripe";
+      bindingAtom = ripeAtom;
+    } else if (hasUnreadable) state = "unreadable";
+    else state = "ripening";
+  } else {
+    // Ripe when every numeric atom fires AND no manual atom remains; a manual atom turns
+    // full numeric ripeness into "manual-gate" — check due, never auto-fired. Binding = weakest link.
+    bindingAtom = numeric.reduce<AtomReadout | undefined>(
+      (worst, a) => (worst === undefined || a.progress! < worst.progress! ? a : worst),
+      undefined,
+    );
+    if (hasUnreadable) state = "unreadable"; // an all-condition with a blind atom can't be known ripe
+    else if (numeric.length > 0 && numeric.every((a) => a.state === "ripe"))
+      state = hasManual ? "manual-gate" : "ripe";
+    else state = "ripening"; // includes pure-manual conditions: they can never auto-ripen
+  }
+  return {
+    state,
+    progress: bindingAtom?.progress ?? null,
+    binding: bindingAtom?.echo ?? atoms[0]?.echo ?? "",
+    atoms,
+  };
+}
+
+// Evaluate one condition against the current store (arm-time echoes, fmtProblem).
+export function evaluateWake(cond: WakeCondition): WakeReadout {
+  return evalCondition(cond, load());
+}
+
+// Every parked problem/spark carrying a condition, evaluated now — ripe first, then by
+// how close to ripe. This is what the digest and wake_status render.
+export function wakeLedger(): WakeEntry[] {
+  const db = load();
+  const entries: WakeEntry[] = [];
+  for (const p of db.problems) {
+    if (p.wakeCondition)
+      entries.push({
+        kind: "problem",
+        id: p.id,
+        context: p.title,
+        summary: p.wakeCondition.summary,
+        readout: evalCondition(p.wakeCondition, db),
+      });
+  }
+  for (const s of db.sparks) {
+    if (s.wakeCondition)
+      entries.push({
+        kind: "spark",
+        id: s.id,
+        context: s.nextStep,
+        summary: s.wakeCondition.summary,
+        readout: evalCondition(s.wakeCondition, db),
+      });
+  }
+  const order: Record<WakeReadout["state"], number> = {
+    ripe: 0,
+    "manual-gate": 1,
+    unreadable: 2,
+    ripening: 3,
+  };
+  return entries.sort(
+    (a, b) =>
+      order[a.readout.state] - order[b.readout.state] ||
+      (b.readout.progress ?? -1) - (a.readout.progress ?? -1) ||
+      a.id - b.id,
+  );
 }

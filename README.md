@@ -24,9 +24,25 @@ runs inside the server, no API key.
 | `evoke` | **The loop.** Feed it a trick; returns your problems + a scaffold walking evocation → transcendence → approach |
 | `capture_spark` | Persist a candidate idea + concrete next step against a problem (+ optional `costToOpen` — the forward effort estimate — and `prior` — your stated p(works), immutable, for later calibration) |
 | `update_spark` | Record a spark's outcome — status (tried/worked/failed), `cost` (actual effort spent), `value` (graded payoff, `0` for a miss). **Log failures too**; the zero-value outcomes are the signal a background-effort policy is learned from |
+| `wake_status` | Evaluate every parked problem/spark's `wakeCondition` right now — ripeness, progress, per-atom current/target echoes |
 
 Storage: `~/.local/share/seven-dpt/store.json` (override with `SEVEN_DPT_DB`). One store,
 shared by every project = one brain.
+
+## Wake conditions (0.1.4)
+
+Retiring a problem parks it with a re-open trigger — but a trigger written in prose is a
+wait owned by "someone will remember." A **`wakeCondition`** makes it computable: a small
+predicate (`all`/`any` over atoms like `sparkCount`, a `date` gate, `fileMatches` /
+`fileLines` / `fileCount` on a path, or an explicit `manual` note) attached when you
+retire/solve a problem (`update_problem`), park a spark (`update_spark`), or capture one
+born gated (`capture_spark`). The ambient digest evaluates every condition at session
+start and surfaces what's ripe (with an act/re-park pointer), what's ripening (with
+`current/target` progress), and — loudly — any condition whose source became unreadable:
+a wake source that vanished must scream, not sit at 0% forever. Everything echoes its aim
+(`prior-ledger.jsonl 12/20`), so a wrong path or unit is visible when you arm it, not
+months later. No auto-reopen: ripeness is surfaced, you decide. `--wake` prints the full
+ledger from the CLI.
 
 ## How it bootstraps
 
