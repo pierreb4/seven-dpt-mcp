@@ -24,6 +24,13 @@ COMPANION to reservation_value.py (original untouched). Three changes from the p
    that is all it has, then a deemed forward cost. Using REALIZED cost INVERTS the ranking -- it penalises
    exactly the problems that have already been chased and shown a hit.
 
+4. CALIBRATED PER-SPARK PRIOR (spark #22). Sparks now carry a stated `prior` = P(this spark works).
+   Where a problem has pending/tried sparks with stated priors, the beta prior's CENTER moves from the
+   global deemed rate to the MEAN of those priors passed through the arc-ledger calibration map
+   (analysis/calibration.py --json -> ~/.local/share/seven-dpt/calibration.json; intercept-only
+   log-odds shift, the slope needs more data). Same PRIOR_STRENGTH, still updated by own resolved
+   hits/misses -- the stated credence replaces the deemed rate, it does not bypass the evidence.
+
 RANKING vs the ABSOLUTE BAR -- the honest split:
   * PROFITABILITY INDEX  PI = E[PV]/cost  ranks the boxes. If (r,g,T) and the value/cost base units are
     shared across problems, the global value<->cost exchange rate CANCELS from the ranking -> the ORDER is
@@ -36,11 +43,13 @@ Run:  python3 analysis/reservation_value_bayes.py
 Knobs (env): DEEMED_RATE(.15) PRIOR_STRENGTH(4) VALUE_SCALE(median hit|1) MAG_PRIOR_STRENGTH(2)
              DISCOUNT_R(.10) GROWTH_G(.10, sampled wide) SAT_HORIZON(10)  N_DRAWS(20000) SEED(0)
 """
-import json, os, random
+import json, math, os, random
 from collections import defaultdict
 
 STORE = os.environ.get("SEVEN_DPT_DB") or os.path.join(
     os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "seven-dpt", "store.json")
+CALJSON = os.environ.get("CALIBRATION_JSON") or os.path.join(
+    os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "seven-dpt", "calibration.json")
 
 DEEMED_RATE        = float(os.environ.get("DEEMED_RATE", 0.15))    # prior P(a spark pays off at all)
 PRIOR_STRENGTH     = float(os.environ.get("PRIOR_STRENGTH", 4))    # deemed rate's equivalent sample size
@@ -91,6 +100,23 @@ DEEMED_COST = float(os.environ.get("COST_DEFAULT",       # deemed FORWARD cost-t
                     sum(_fwd_pool)/len(_fwd_pool) if _fwd_pool else 1.0))
 a0, b0 = DEEMED_RATE * PRIOR_STRENGTH, (1 - DEEMED_RATE) * PRIOR_STRENGTH
 
+# ---- calibration map for stated spark priors (change #4) -- identity when no json exists ----
+try:
+    _cal = json.load(open(CALJSON)); CAL_SHIFT = float(_cal["logodds_shift"])
+    CAL_NOTE = f"cal shift {CAL_SHIFT:+.2f} (arc n={_cal['n']}, bias {_cal['bias']:+.2f})"
+except (FileNotFoundError, KeyError, ValueError):
+    _cal, CAL_SHIFT, CAL_NOTE = None, 0.0, "no calibration.json -> stated priors taken at face value"
+
+def calibrate(p):
+    p = min(max(float(p), 0.01), 0.99)
+    return 1.0 / (1.0 + math.exp(-(math.log(p / (1 - p)) + CAL_SHIFT)))
+
+def stated_prior_center(all_sp):
+    """Mean CALIBRATED stated prior over not-yet-resolved sparks, else None -> deemed rate."""
+    prs = [s.get("prior") for s in all_sp
+           if status(s) in FWD_STATUSES and isinstance(s.get("prior"), (int, float))]
+    return (sum(calibrate(p) for p in prs) / len(prs), len(prs)) if prs else (None, 0)
+
 def annuity_factor(r, g, T):
     """PV of 1 unit in period 1 compounding at g for T periods, discounted at r. Finite for ALL g,r>-1
     because T is finite -- that is the saturation assumption doing its job (no r>g guard needed)."""
@@ -138,6 +164,7 @@ print(f"  hit-rate Beta({a0:.2f},{b0:.2f}) [deemed {DEEMED_RATE:.0%}] | deemed w
 print(f"  pooled: {len(POOL_MAGS)} hits, {len(POOL_CTO)} logged / {len(POOL_FWD_COSTS)} inferred-fwd / {len(POOL_REAL_COSTS)} realized costs")
 print(f"  stream: discount r={DISCOUNT_R:.0%}, growth g~{GROWTH_G:.0%} (wide), saturate T={SAT_HORIZON} "
       f"=> annuity factor ~{af_mean:.2f}x | draws {N_DRAWS} seed {SEED}")
+print(f"  stated-prior channel: {CAL_NOTE}")
 print("-" * 82)
 
 ranked = []
@@ -147,10 +174,12 @@ for pid in sorted(problems):
     own_hits = [val(s) for s in sp if (val(s) or 0) > 0]
     hits, miss = len(own_hits), len(sp) - len(own_hits)
     cost_i, csrc = cost_to_open(all_sp)                           # FORWARD-preferring cost-to-open
+    p0, np0 = stated_prior_center(all_sp)                         # calibrated stated priors (change #4)
+    a0_i, b0_i = (p0 * PRIOR_STRENGTH, (1 - p0) * PRIOR_STRENGTH) if p0 is not None else (a0, b0)
 
     pv = []
     for _ in range(N_DRAWS):
-        p = random.betavariate(a0 + hits, b0 + miss)              # posterior hit-rate from OWN data
+        p = random.betavariate(a0_i + hits, b0_i + miss)          # posterior hit-rate from OWN data
         if random.random() < p:
             g = random.uniform(0.0, 2.0 * GROWTH_G)               # WIDE prior on g (refine from reuse later)
             pv.append(sample_magnitude(own_hits) * annuity_factor(DISCOUNT_R, g, SAT_HORIZON))
@@ -162,7 +191,9 @@ for pid in sorted(problems):
 
     rate_prior_frac = PRIOR_STRENGTH / (PRIOR_STRENGTH + len(sp))
     mag_src = "own" if hits else ("pool" if POOL_MAGS else "prior")
-    tag = ("EXPLORE(prior-led)" if not sp and not own_hits else f"prior~{rate_prior_frac:.0%} mag:{mag_src}")
+    p0str = f"p0:cal {p0:.2f}({np0}sp)" if p0 is not None else "p0:deemed"
+    tag = (f"EXPLORE(prior-led) {p0str}" if not sp and not own_hits
+           else f"prior~{rate_prior_frac:.0%} {p0str} mag:{mag_src}")
     floored = z <= min(pv) - 1.0 + 1e-9
     ranked.append((pi, e_pv, z, pid, cost_i, csrc, hits, miss, tag, floored))
 

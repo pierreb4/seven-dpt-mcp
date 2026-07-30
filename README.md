@@ -69,6 +69,11 @@ resolved sparks (with cost + value, *including failures*) accrue, so the policy 
 precision. A companion, `analysis/reservation_value_bayes.py`, adds a posterior-predictive prior (so it
 can rank under sparse data) and models the one-time `costToOpen` against a compounding-but-saturating
 benefit stream — ranking by profitability index, which is invariant to the value↔cost exchange rate.
+`analysis/calibration.py` closes the loop on the `prior` field: it audits stated priors against realized
+outcomes (reliability table, Brier/skill, drift check) from any two-line JSONL ledger of
+pre-registered priors + resolutions, and `--json` persists a de-bias map that
+`reservation_value_bayes.py` picks up — so the index runs on *calibrated* stated credences instead of a
+deemed hit-rate.
 
 ## Install (turn on for all projects)
 
