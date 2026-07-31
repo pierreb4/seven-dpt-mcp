@@ -73,7 +73,13 @@ benefit stream — ranking by profitability index, which is invariant to the val
 outcomes (reliability table, Brier/skill, drift check) from any two-line JSONL ledger of
 pre-registered priors + resolutions, and `--json` persists a de-bias map that
 `reservation_value_bayes.py` picks up — so the index runs on *calibrated* stated credences instead of a
-deemed hit-rate.
+deemed hit-rate. `analysis/ledger_invariants.py` audits the *program* the same ledger records, not any
+single probe: deterministic invariants for the failure class where every result is locally sound and the
+project is still wrong — a park-streak check (K straddles-zero verdicts in a row on the primary metric
+means the instrument, not the ideas, is the suspect), power-at-preregistration (a gate below the banked
+MDE is unresolvable *before* it runs), and channel-liveness stamps. It reports its own note-classification
+coverage, exits 1 on alerts, supports `--asof` retrodiction, and `--json` emits ALERT markers a hook or
+`wakeCondition` (`fileMatches` on the output) can gate on.
 
 ## Install (turn on for all projects)
 
