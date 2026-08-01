@@ -40,6 +40,19 @@ export interface Spark {
   // stated priors to realized outcomes and de-bias. IMMUTABLE by design: update_spark never
   // touches it, because a post-hoc revision would let hindsight contaminate exactly that audit.
   prior: number | null;
+  // Logical TYPE of the claim (0.1.5, from the scope-leak census): a null result against a
+  // UNIVERSAL claim kills the claim; against an EXISTENTIAL-BOUNDED one it kills only the tested
+  // frame — the census measured 12-20% of verdicts banking frame-nulls in kill vocabulary.
+  // WRITE-ONCE: settable late (backfill beats never) but immutable once stated.
+  claimType: "universal" | "existential-bounded" | null;
+  // The content statement: one sentence naming an observation this spark RULES OUT — the
+  // conjecture-side twin of a pre-registered gate (a spark that forbids nothing is
+  // unfalsifiable spend). WRITE-ONCE, same anti-hindsight rationale as `prior`.
+  forbids: string | null;
+  // The retirement predicate — when to ABANDON rather than re-park: the dual of wakeCondition
+  // (wake = when a parked spark revives; exhaustion = when it dies). Without it a parked
+  // existential is unkillable-in-practice. WRITE-ONCE.
+  exhaustion: string | null;
   // FORWARD estimate of the effort to chase this spark to a verdict, set at capture and PRESERVED:
   // update_spark refines `cost` to the realized spend but never touches this. It is the Pandora/
   // Gittins "cost to open the box" the spend-policy ranks on — kept separate so resolving a spark
@@ -194,6 +207,9 @@ function load(): DB {
     merged.sparks = merged.sparks.map((s) => ({
       ...s,
       prior: s.prior ?? null,
+      claimType: s.claimType ?? null,
+      forbids: s.forbids ?? null,
+      exhaustion: s.exhaustion ?? null,
       costToOpen: s.costToOpen ?? null,
       cost: s.cost ?? null,
       value: s.value ?? null,
@@ -326,6 +342,9 @@ export function captureSpark(input: {
   idea: string;
   nextStep: string;
   prior?: number;
+  claimType?: "universal" | "existential-bounded";
+  forbids?: string;
+  exhaustion?: string;
   costToOpen?: number;
   cost?: number;
   wakeCondition?: WakeCondition;
@@ -343,6 +362,9 @@ export function captureSpark(input: {
     outcome: null,
     status: "pending",
     prior: input.prior ?? null,
+    claimType: input.claimType ?? null,
+    forbids: input.forbids ?? null,
+    exhaustion: input.exhaustion ?? null,
     // The a-priori estimate IS the forward cost-to-open; keep it in its own field so a later
     // update_spark that refines `cost` to the realized spend can't destroy it. Accept the legacy
     // `cost` arg as the estimate too, for callers written before costToOpen existed.
@@ -366,6 +388,9 @@ export function updateSpark(input: {
   id: number;
   outcome?: string;
   status?: SparkStatus;
+  claimType?: "universal" | "existential-bounded";
+  forbids?: string;
+  exhaustion?: string;
   costToOpen?: number;
   cost?: number;
   value?: number;
@@ -378,6 +403,12 @@ export function updateSpark(input: {
   if (input.status !== undefined) spark.status = input.status;
   // `prior` is deliberately NOT accepted here: stated-at-capture credences are immutable,
   // or the calibration audit they exist for would be contaminated by hindsight.
+  // claimType/forbids/exhaustion are WRITE-ONCE: settable here only while unset (late backfill
+  // beats never), but an existing statement never changes — revising what a spark forbids, or
+  // its claim scope, after seeing results is the conventionalist stratagem the fields block.
+  if (input.claimType !== undefined && spark.claimType === null) spark.claimType = input.claimType;
+  if (input.forbids !== undefined && spark.forbids === null) spark.forbids = input.forbids;
+  if (input.exhaustion !== undefined && spark.exhaustion === null) spark.exhaustion = input.exhaustion;
   // costToOpen is the forward estimate — revisable before resolution, but resolution never
   // auto-touches it (that is the whole point of keeping it separate from `cost`).
   if (input.costToOpen !== undefined) spark.costToOpen = input.costToOpen;

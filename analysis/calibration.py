@@ -23,12 +23,17 @@ OUTPUT (text; at this n the binned table IS the reliability curve):
   3. de-bias map         intercept-only log-odds shift (headline) + Platt (a,b); --json persists it
   4. drift check         first half vs second half by pre-registration time
   5. exclusions report   voids / amended / in-flight / correction / multi-terminal ids
+  6. scope stamp         claimType composition of scored pairs -- scoring is scope-blind by
+                         construction (a frame-null counts as a claim-failure), so unstamped
+                         existentials are the visible residual risk (scope-leak census 2026-08-01)
+  7. era split           --split YYYY-MM-DD partitions by prereg ts (spark #31: a model upgrade
+                         is a changepoint -- re-price, don't pool across it); per-era bias/skill/shift
 
 --json writes the de-bias map for reservation_value_bayes.py to consume. It lands in the XDG
 data dir next to store.json (runtime-derived state, NOT repo content):
     ~/.local/share/seven-dpt/calibration.json          (env CALIBRATION_JSON overrides)
 
-Run:  python3 analysis/calibration.py [--json]
+Run:  python3 analysis/calibration.py [--json] [--split YYYY-MM-DD]
 Env:  ARC_PRIOR_LEDGER (default ~/projects/arc-agi-3/launch/prior-ledger.jsonl)
       SEVEN_DPT_DB, CALIBRATION_JSON, BINS (default 4)
 """
@@ -44,6 +49,7 @@ OUTJSON = os.environ.get("CALIBRATION_JSON") or os.path.join(
           "seven-dpt", "calibration.json")
 BINS = int(os.environ.get("BINS", 4))
 TERMINAL = ("cleared", "failed")
+SPLIT = sys.argv[sys.argv.index("--split") + 1] if "--split" in sys.argv else None
 
 def logit(p):   return math.log(p / (1.0 - p))
 def sigmoid(x): return 1.0 / (1.0 + math.exp(-x))
@@ -81,7 +87,8 @@ for pid in order:
         if len(terminals) > 1: multi_terminal.append(pid)
         if any(l["outcome"] == "void" for l in outs): void_then_adjudicated.append(pid)
         resolved.append({"id": pid, "ts": prior["ts"], "p": float(prior["prior"]),
-                         "y": 1 if terminals[-1]["outcome"] == "cleared" else 0})
+                         "y": 1 if terminals[-1]["outcome"] == "cleared" else 0,
+                         "ct": prior.get("claimType") or prior.get("scope")})
     elif any(l["outcome"] == "void" for l in outs):                   voids.append(pid)
     elif any(l["outcome"] == "amended-before-running" for l in outs): amended.append(pid)
     else:                                                             inflight.append(pid)
@@ -191,6 +198,44 @@ if void_then_adjudicated:
     print(f"  void run then adjudicated on retry (resolution wins, void line absorbed): "
           f"{_lst(void_then_adjudicated)}")
 
+# ---- scope stamp (0.1.5): scoring is scope-blind by construction -------------------------------
+n_u  = sum(1 for r in resolved if r["ct"] == "universal")
+n_e  = sum(1 for r in resolved if r["ct"] and r["ct"] != "universal")
+n_un = n - n_u - n_e
+print("-" * 86)
+print(f"  scope stamp: {n_u} universal / {n_e} existential-bounded / {n_un} unstamped of {n} scored")
+print(f"    a frame-null scores as a claim-failure here (scope-blind); stamp prereg lines with"
+      f" claimType so a frame-kill is never read as a lever-kill.")
+
+# ---- era split (--split): a model upgrade is a changepoint; re-price, don't pool (spark #31) ---
+era_out = None
+if SPLIT:
+    eras = (("pre", [r for r in resolved if r["ts"][:10] < SPLIT]),
+            ("post", [r for r in resolved if r["ts"][:10] >= SPLIT]))
+    print("-" * 86)
+    print(f"  era split at {SPLIT} (by pre-registration ts)")
+    era_out = {"date": SPLIT}
+    for tag, h in eras:
+        if len(h) < 6:
+            print(f"    {tag:>4}: n={len(h)} -- too few to read (needs >=6 per era)")
+            era_out[tag] = {"n": len(h)}
+            continue
+        hn = len(h); hk = sum(r["y"] for r in h)
+        hb = hk / hn; hp = sum(r["p"] for r in h) / hn
+        hlo, hhi = wilson(hk, hn)
+        hbrier = sum((r["p"] - r["y"]) ** 2 for r in h) / hn
+        href = sum((hb - r["y"]) ** 2 for r in h) / hn
+        hskill = 1 - hbrier / href if href > 0 else float("nan")
+        hd = shift_for_base([r["p"] for r in h], hb) if 0 < hb < 1 else float("nan")
+        era_out[tag] = {"n": hn, "base": round(hb, 4), "mean_prior": round(hp, 4),
+                        "bias": round(hp - hb, 4), "skill": round(hskill, 4), "shift": round(hd, 4)}
+        print(f"    {tag:>4} (n={hn}, {h[0]['ts'][:10]}..{h[-1]['ts'][:10]}): rate {hb:.2f} [{hlo:.2f},{hhi:.2f}]"
+              f"  mean prior {hp:.2f}  bias {hp - hb:+.2f}  skill {hskill:+.2f}  shift {hd:+.2f}")
+    if all(isinstance(era_out.get(t), dict) and era_out[t].get("n", 0) >= 6 for t in ("pre", "post")):
+        print(f"    bias delta (post - pre) = {era_out['post']['bias'] - era_out['pre']['bias']:+.2f}"
+              f"  |  shift delta = {era_out['post']['shift'] - era_out['pre']['shift']:+.2f}"
+              f"  -- at these n read as DIRECTION unless the era base-rate CIs are disjoint.")
+
 # ---- seven-dpt's own store (the eventual consumer; accrues too slowly to curve) ---------------
 try:
     d = json.load(open(STORE))
@@ -212,7 +257,9 @@ if "--json" in sys.argv:
            "bias": round(bias, 4), "bias_inside_ci": inside, "brier": round(brier, 4),
            "skill": round(skill, 4), "logodds_shift": round(delta, 4),
            "platt": {"a": round(pa, 4), "b": round(pb, 4)},
+           "scope": {"universal": n_u, "existential_bounded": n_e, "unstamped": n_un},
            "last_resolved_ts": resolved[-1]["ts"]}
+    if era_out: out["split"] = era_out
     os.makedirs(os.path.dirname(OUTJSON), exist_ok=True)
     json.dump(out, open(OUTJSON, "w"), indent=2)
     print("-" * 86)

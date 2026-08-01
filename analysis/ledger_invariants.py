@@ -21,6 +21,10 @@ Reads the same two-line JSONL ledger as calibration.py (pre-registration lines c
                 liveness (`channel` [+ `liveness`] fields on the prereg line) — the
                 discipline that prevents optimizing a channel that is 0% of the live path.
                 Coverage is reported; missing stamps WARN (ALERT with CHANNEL_STRICT=1).
+  ORPHANED-EXISTENTIAL (seven-dpt store): a parked spark with a wakeCondition but no
+                `exhaustion` statement can revive but never die — unfalsifiable-in-practice
+                spend (scope-leak census 2026-08-01: L=12.8-20.5%, gate cleared). Universal
+                claims are exempt (their death IS a null). WARN; ALERT with STORE_STRICT=1.
 
 Note classification is heuristic BY DESIGN and the script reports its own coverage: an
 invariant running blind (many unclassified notes) says so instead of staying silent.
@@ -217,6 +221,31 @@ def main():
     elif missing:
         print("  WARN: unstamped levers can optimize a dead channel undetected — add `channel` (+`liveness`) at registration")
     out["channel"] = {"stamped": len(stamped), "total": len(allpre)}
+
+    # ── ORPHANED EXISTENTIALS (seven-dpt store, if present) ──
+    store_p = os.environ.get("SEVEN_DPT_DB") or os.path.join(
+        os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "seven-dpt", "store.json")
+    if os.path.exists(store_p):
+        try:
+            sdb = json.load(open(store_p))
+        except ValueError:
+            sdb = None
+        if sdb:
+            parked = [s for s in sdb.get("sparks", [])
+                      if s.get("wakeCondition") and s.get("status") not in ("worked", "failed")]
+            owned = [s for s in parked if s.get("exhaustion")]
+            orphaned = [s for s in parked if s.get("claimType") != "universal" and not s.get("exhaustion")]
+            print(f"\nSTORE (seven-dpt)  parked-with-wake {len(parked)} · exhaustion stated {len(owned)}"
+                  f" · ORPHANED-EXISTENTIAL {len(orphaned)}"
+                  + (f" · ids: {', '.join('#' + str(s['id']) for s in orphaned[:10])}" if orphaned else ""))
+            if orphaned:
+                msg = (f"{len(orphaned)} parked spark(s) can revive but never die — "
+                       f"state `exhaustion` via update_spark (write-once)")
+                if os.environ.get("STORE_STRICT"):
+                    alerts.append("ALERT orphaned-existential: " + msg)
+                else:
+                    print("  WARN: " + msg)
+            out["store"] = {"parked": len(parked), "orphaned": len(orphaned)}
 
     out["alerts"] = alerts
     print()

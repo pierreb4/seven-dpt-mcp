@@ -22,8 +22,8 @@ runs inside the server, no API key.
 | `list_problems` | See your open problems |
 | `get_problem` | One problem + every spark (idea, next step, outcome) — the memory |
 | `evoke` | **The loop.** Feed it a trick; returns your problems + a scaffold walking evocation → transcendence → approach |
-| `capture_spark` | Persist a candidate idea + concrete next step against a problem (+ optional `costToOpen` — the forward effort estimate — and `prior` — your stated p(works), immutable, for later calibration) |
-| `update_spark` | Record a spark's outcome — status (tried/worked/failed), `cost` (actual effort spent), `value` (graded payoff, `0` for a miss). **Log failures too**; the zero-value outcomes are the signal a background-effort policy is learned from |
+| `capture_spark` | Persist a candidate idea + concrete next step against a problem (+ optional `costToOpen` — the forward effort estimate — `prior` — your stated p(works), immutable, for later calibration — and the claim-typing trio: `claimType` universal/existential-bounded, `forbids` — one observation the spark rules out — and `exhaustion` — when to abandon rather than re-park. All write-once) |
+| `update_spark` | Record a spark's outcome — status (tried/worked/failed), `cost` (actual effort spent), `value` (graded payoff, `0` for a miss). **Log failures too**; the zero-value outcomes are the signal a background-effort policy is learned from. Can backfill `claimType`/`forbids`/`exhaustion` while unset (write-once: never revises) |
 | `wake_status` | Evaluate every parked problem/spark's `wakeCondition` right now — ripeness, progress, per-atom current/target echoes |
 
 Storage: `~/.local/share/seven-dpt/store.json` (override with `SEVEN_DPT_DB`). One store,
@@ -73,13 +73,17 @@ benefit stream — ranking by profitability index, which is invariant to the val
 outcomes (reliability table, Brier/skill, drift check) from any two-line JSONL ledger of
 pre-registered priors + resolutions, and `--json` persists a de-bias map that
 `reservation_value_bayes.py` picks up — so the index runs on *calibrated* stated credences instead of a
-deemed hit-rate. `analysis/ledger_invariants.py` audits the *program* the same ledger records, not any
+deemed hit-rate; `--split YYYY-MM-DD` partitions the curve at a changepoint (a model upgrade re-prices
+estimates — don't pool across one untested), and a scope stamp reports the claimType mix of scored pairs,
+since a frame-bounded null scored as a claim-failure is the one bias the audit can't see from numbers
+alone. `analysis/ledger_invariants.py` audits the *program* the same ledger records, not any
 single probe: deterministic invariants for the failure class where every result is locally sound and the
 project is still wrong — a park-streak check (K straddles-zero verdicts in a row on the primary metric
 means the instrument, not the ideas, is the suspect), power-at-preregistration (a gate below the banked
-MDE is unresolvable *before* it runs), and channel-liveness stamps. It reports its own note-classification
-coverage, exits 1 on alerts, supports `--asof` retrodiction, and `--json` emits ALERT markers a hook or
-`wakeCondition` (`fileMatches` on the output) can gate on.
+MDE is unresolvable *before* it runs), channel-liveness stamps, and ORPHANED-EXISTENTIAL (a parked spark
+with a wake but no `exhaustion` can revive but never die — unfalsifiable-in-practice spend). It reports
+its own note-classification coverage, exits 1 on alerts, supports `--asof` retrodiction, and `--json`
+emits ALERT markers a hook or `wakeCondition` (`fileMatches` on the output) can gate on.
 
 ## Install (turn on for all projects)
 

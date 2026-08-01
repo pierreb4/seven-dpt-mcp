@@ -49,6 +49,9 @@ function mkSpark(id: number, over: Record<string, unknown> = {}) {
     outcome: null,
     status: "pending",
     prior: null,
+    claimType: null,
+    forbids: null,
+    exhaustion: null,
     costToOpen: null,
     cost: null,
     value: null,
@@ -296,4 +299,50 @@ test("digest prints nothing when the store has nothing to say", () => {
     encoding: "utf8",
   });
   assert.equal(out, "");
+});
+
+// ---------- claim-typing fields (0.1.5: claimType / forbids / exhaustion) ----------
+
+test("claim fields persist from capture and render in get_problem lineage", () => {
+  useStore([mkProblem(1)], []);
+  const sp = captureSpark({
+    problemId: 1,
+    trick: "t",
+    idea: "i",
+    nextStep: "n",
+    claimType: "existential-bounded",
+    forbids: "cosine beats diffusion at n>=50 on heterogeneous marginals",
+    exhaustion: "two consecutive losing re-runs abandon the lever",
+  });
+  assert.ok(sp);
+  assert.equal(sp!.claimType, "existential-bounded");
+  assert.equal(sp!.forbids, "cosine beats diffusion at n>=50 on heterogeneous marginals");
+  assert.equal(sp!.exhaustion, "two consecutive losing re-runs abandon the lever");
+});
+
+test("claim fields are write-once: backfill lands, revision is refused", () => {
+  useStore([mkProblem(1)], [mkSpark(1, { status: "tried" })]);
+  // backfill on a spark that never stated them -> lands
+  const first = updateSpark({ id: 1, claimType: "existential-bounded", forbids: "F1", exhaustion: "E1" });
+  assert.equal(first!.claimType, "existential-bounded");
+  assert.equal(first!.forbids, "F1");
+  assert.equal(first!.exhaustion, "E1");
+  // second write -> refused, original kept
+  const second = updateSpark({ id: 1, claimType: "universal", forbids: "F2", exhaustion: "E2" });
+  assert.equal(second!.claimType, "existential-bounded");
+  assert.equal(second!.forbids, "F1");
+  assert.equal(second!.exhaustion, "E1");
+});
+
+test("old stores load with claim fields backfilled to null", () => {
+  useStore([mkProblem(1)], [{ ...mkSpark(1) } as Record<string, unknown>]);
+  const legacy = useStore(
+    [mkProblem(1)],
+    [(() => { const s = mkSpark(1) as Record<string, unknown>; delete s.claimType; delete s.forbids; delete s.exhaustion; return s; })()],
+  );
+  void legacy;
+  const done = updateSpark({ id: 1, outcome: "touched" });
+  assert.equal(done!.claimType, null);
+  assert.equal(done!.forbids, null);
+  assert.equal(done!.exhaustion, null);
 });

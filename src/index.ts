@@ -335,10 +335,12 @@ server.registerTool(
       ? sparks
           .map(
             (s) =>
-              `  • [spark #${s.id} · ${s.status}] ${s.idea}\n      next: ${s.nextStep}` +
+              `  • [spark #${s.id} · ${s.status}${s.claimType ? ` · ${s.claimType}` : ""}] ${s.idea}\n      next: ${s.nextStep}` +
               (s.prior !== null || s.costToOpen !== null || s.cost !== null || s.value !== null
                 ? `\n      ${s.prior !== null ? `prior: ${s.prior} · ` : ""}cost-to-open: ${s.costToOpen ?? "?"} · actual cost: ${s.cost ?? "?"} · value: ${s.value ?? "?"}`
                 : "") +
+              (s.forbids ? `\n      forbids: ${s.forbids}` : "") +
+              (s.exhaustion ? `\n      exhaustion: ${s.exhaustion}` : "") +
               (s.outcome ? `\n      outcome: ${s.outcome}` : "") +
               `\n      (evoked by: ${s.trick})`,
           )
@@ -386,6 +388,24 @@ server.registerTool(
         .describe(
           "Your honest stated probability (0-1) at capture that chasing this spark yields a worked outcome. IMMUTABLE afterwards — update_spark cannot revise it — so stated credences can later be calibrated against realized outcomes. State what you believe, not what sounds good; the audit compares.",
         ),
+      claimType: z
+        .enum(["universal", "existential-bounded"])
+        .optional()
+        .describe(
+          "Logical type of the claim, so a null result kills the right thing: 'universal' = a clean null anywhere kills the CLAIM; 'existential-bounded' = the claim asserts existence within a named frame, so a null kills only the tested FRAME. Most sparks are existential-bounded. Write-once.",
+        ),
+      forbids: z
+        .string()
+        .optional()
+        .describe(
+          "One sentence naming an observation this spark RULES OUT — the content statement (a spark that forbids nothing is unfalsifiable spend). Write-once, immutable like `prior`: revising it after results is the post-hoc rescue it exists to block.",
+        ),
+      exhaustion: z
+        .string()
+        .optional()
+        .describe(
+          "The retirement predicate: when to ABANDON this spark rather than re-park it (the dual of wakeCondition — wake says when it revives, exhaustion says when it dies). E.g. 'second unpowered read at n>=50 abandons the meter'. Write-once.",
+        ),
       costToOpen: z
         .number()
         .optional()
@@ -403,15 +423,17 @@ server.registerTool(
         ),
     },
   },
-  async ({ problemId, trick, idea, nextStep, prior, costToOpen, cost, wakeCondition }) => {
-    const spark = captureSpark({ problemId, trick, idea, nextStep, prior, costToOpen, cost, wakeCondition });
+  async ({ problemId, trick, idea, nextStep, prior, claimType, forbids, exhaustion, costToOpen, cost, wakeCondition }) => {
+    const spark = captureSpark({ problemId, trick, idea, nextStep, prior, claimType, forbids, exhaustion, costToOpen, cost, wakeCondition });
     if (!spark)
       return { content: [{ type: "text", text: `No problem #${problemId}; spark not saved.` }], isError: true };
     const pr = spark.prior !== null ? ` · prior ${spark.prior}` : "";
+    const ct = spark.claimType !== null ? ` · ${spark.claimType}` : "";
     const co = spark.costToOpen !== null ? ` · cost-to-open ${spark.costToOpen}` : "";
+    const fb = spark.forbids !== null ? `\nForbids: ${spark.forbids}` : "";
     const armed = spark.wakeCondition ? `\n${fmtWakeArmed(spark.wakeCondition)}` : "";
     return {
-      content: [{ type: "text", text: `Captured spark #${spark.id} on problem #${problemId}${pr}${co}.${armed}\nNext step: ${nextStep}` }],
+      content: [{ type: "text", text: `Captured spark #${spark.id} on problem #${problemId}${pr}${ct}${co}.${fb}${armed}\nNext step: ${nextStep}` }],
     };
   },
 );
@@ -429,6 +451,24 @@ server.registerTool(
         .enum(["pending", "tried", "worked", "failed"])
         .optional()
         .describe("New status for the spark"),
+      claimType: z
+        .enum(["universal", "existential-bounded"])
+        .optional()
+        .describe(
+          "Backfill the claim's logical type IF never stated (write-once: ignored when already set). 'universal' = a null kills the claim; 'existential-bounded' = a null kills only the tested frame.",
+        ),
+      forbids: z
+        .string()
+        .optional()
+        .describe(
+          "Backfill the content statement (one observation this spark rules out) IF never stated. Write-once: an existing forbids is immutable — revising it after results is the post-hoc rescue it exists to block.",
+        ),
+      exhaustion: z
+        .string()
+        .optional()
+        .describe(
+          "State the retirement predicate (when to ABANDON rather than re-park — the dual of wakeCondition) IF never stated. Write-once. A parked spark with a wake but no exhaustion is unkillable-in-practice; ledger_invariants.py flags these as ORPHANED-EXISTENTIAL.",
+        ),
       costToOpen: z
         .number()
         .optional()
@@ -453,16 +493,21 @@ server.registerTool(
         ),
     },
   },
-  async ({ id, outcome, status, costToOpen, cost, value, wakeCondition }) => {
-    const spark = updateSpark({ id, outcome, status, costToOpen, cost, value, wakeCondition });
+  async ({ id, outcome, status, claimType, forbids, exhaustion, costToOpen, cost, value, wakeCondition }) => {
+    const spark = updateSpark({ id, outcome, status, claimType, forbids, exhaustion, costToOpen, cost, value, wakeCondition });
     if (!spark) return { content: [{ type: "text", text: `No spark #${id}.` }], isError: true };
     const bits = [`status=${spark.status}`];
     if (spark.cost !== null) bits.push(`cost=${spark.cost}`);
     if (spark.value !== null) bits.push(`value=${spark.value}`);
+    // Write-once refusals must be VISIBLE: a silently-dropped backfill would read as saved.
+    const refused = (["claimType", "forbids", "exhaustion"] as const).filter(
+      (f) => ({ claimType, forbids, exhaustion })[f] !== undefined && spark[f] !== ({ claimType, forbids, exhaustion })[f],
+    );
+    const kept = refused.length ? `\n(write-once: ${refused.join(", ")} already set — kept the original)` : "";
     const tail = spark.outcome ? `, outcome: ${spark.outcome}` : "";
     const armed =
       wakeCondition != null && spark.wakeCondition ? `\n${fmtWakeArmed(spark.wakeCondition)}` : "";
-    return { content: [{ type: "text", text: `Updated spark #${spark.id}: ${bits.join(", ")}${tail}${armed}` }] };
+    return { content: [{ type: "text", text: `Updated spark #${spark.id}: ${bits.join(", ")}${tail}${kept}${armed}` }] };
   },
 );
 
