@@ -11,6 +11,10 @@ PAIRING RULES (learned from the live ledger, not just the protocol):
   * cleared/failed -> resolved. If an id has SEVERAL terminal lines (a retry adjudicated under
     the same pre-registration), the LAST one is the verdict -- "record the final adjudication"
     -- and the id is flagged in the exclusions report so the choice is visible.
+  * relabel                -> a LATER relabel line supersedes the terminal it follows: the audit
+                              re-graded the verdict NULL-EQUIVALENT (adoption-bar-restated,
+                              2026-08-02), so the pair leaves the curve. A terminal appended
+                              after the relabel (re-adjudicated on a new run) re-scores it.
   * void                   -> logged, excluded from the curve (protocol).
   * amended-before-running -> pre-registration superseded before any run; excluded (immutability
                               starts when the run starts).
@@ -74,16 +78,20 @@ for line in open(LEDGER):
 
 resolved, voids, amended, inflight, corrections, multi_terminal, void_then_adjudicated = \
     [], [], [], [], [], [], []
+relabeled = []
 for pid in order:
     lines = by_id[pid]
     priors    = [l for l in lines if "prior" in l]
     outs      = [l for l in lines if "outcome" in l]
     terminals = [l for l in outs if l["outcome"] in TERMINAL]
+    verdicts  = [l for l in outs if l["outcome"] in TERMINAL or l["outcome"] == "relabel"]
     corrections += [pid for l in outs if l["outcome"] == "correction"]
     if not priors:
         continue  # outcome-only id (shouldn't happen; visible via line-count check below)
     prior = priors[-1]
-    if terminals:
+    if verdicts and verdicts[-1]["outcome"] == "relabel":
+        relabeled.append(pid)
+    elif terminals:
         if len(terminals) > 1: multi_terminal.append(pid)
         if any(l["outcome"] == "void" for l in outs): void_then_adjudicated.append(pid)
         resolved.append({"id": pid, "ts": prior["ts"], "p": float(prior["prior"]),
@@ -102,7 +110,7 @@ print("seven-dpt #2  stated-prior calibration  (arc prior-ledger testbed)")
 print("=" * 86)
 print(f"  ledger: {LEDGER}")
 print(f"  ids: {len(by_id)} | resolved {n} | void {len(voids)} | amended-pre-run {len(amended)}"
-      f" | in-flight {len(inflight)}")
+      f" | in-flight {len(inflight)} | relabel-superseded {len(relabeled)}")
 if n < 10:
     print(f"\n  only {n} resolved -- below any useful curve. Come back at >=20."); sys.exit(0)
 
@@ -192,6 +200,8 @@ def _lst(xs): return ", ".join(xs) if xs else "-"
 print(f"  excluded  void: {_lst(voids)}")
 print(f"            amended-before-running: {_lst(amended)}")
 print(f"            in-flight: {_lst(inflight)}")
+if relabeled:
+    print(f"            relabel-superseded (audit re-graded NULL-EQUIVALENT; off the curve): {_lst(relabeled)}")
 if corrections:    print(f"  note-corrections seen (verdict untouched): {_lst(corrections)}")
 if multi_terminal: print(f"  multi-terminal ids (LAST adjudication used): {_lst(multi_terminal)}")
 if void_then_adjudicated:
