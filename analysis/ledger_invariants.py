@@ -208,7 +208,9 @@ def main():
               + (f" ({', '.join(i for i, _, _ in weak_hist[:5])}{'…' if len(weak_hist) > 5 else ''})" if weak_hist else ""))
         if unparsed:
             print(f"  unparsed gates ({len(unparsed)}): {', '.join(unparsed[:6])}{'…' if len(unparsed) > 6 else ''} — add explicit `gate`+`unit` fields to prereg lines")
-        out["power"] = {"historical_weak": len(weak_hist), "unparsed": len(unparsed)}
+        out["power"] = {"historical_weak": len(weak_hist), "unparsed": len(unparsed),
+                        "predetermined": [{"id": i, "gate": g, "mde": m} for i, g, m in weak_hist],
+                        "unparsed_ids": unparsed}
 
     # ── CHANNEL STAMP ──
     allpre = inflight + resolved
