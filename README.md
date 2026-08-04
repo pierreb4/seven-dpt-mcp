@@ -44,6 +44,26 @@ a wake source that vanished must scream, not sit at 0% forever. Everything echoe
 months later. No auto-reopen: ripeness is surfaced, you decide. `--wake` prints the full
 ledger from the CLI.
 
+## Claim typing (0.1.5)
+
+A parked spark with a wake condition can *revive* — but nothing says when it may *die*, so
+an unfalsifiable hope can ride the digest forever. 0.1.5 gives every spark an optional
+claim-typing trio, all **write-once** on the same anti-hindsight model as `prior`:
+
+- **`claimType`** — `universal` ("this always holds") vs `existential-bounded` ("this holds
+  somewhere, within a stated frame"). A frame-bounded null is not a claim-failure; typing the
+  claim keeps a frame-kill from being read as a lever-kill.
+- **`forbids`** — one concrete observation the spark rules out. If nothing is forbidden,
+  nothing can refute it, and the spark is a mood, not a claim.
+- **`exhaustion`** — the retirement predicate, the dual of `wakeCondition`: the condition
+  under which the spark is abandoned rather than re-parked.
+
+Set them at capture, or backfill later *while unset* (`update_spark`); revision after the
+fact is refused with a visible notice — rewriting what a claim forbids after seeing results
+is the conventionalist stratagem the fields exist to block. `ledger_invariants.py` flags
+**ORPHANED-EXISTENTIAL** sparks (parked with a wake, no exhaustion — can revive but never
+die), and `calibration.py` stamps the claimType mix of every scored cohort.
+
 ## How it bootstraps
 
 On first run (no store file yet), the store **seeds itself with seven-dpt's own five open
