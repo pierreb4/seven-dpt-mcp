@@ -79,6 +79,29 @@ INSIDE = re.compile(r"straddl|inside the noise|within (the )?noise|under (the )?
                     r"consistent with (zero|no effect|the null)", re.I)
 CI = re.compile(r"\[\s*(-?\d+(?:\.\d+)?)\s*,\s*\+?(-?\d+(?:\.\d+)?)\s*\]")
 
+# ── ledger dialects (mirrors calibration.py) ─────────────────────────────────
+# v1: two lines/probe — {prior, criterion} then {outcome, note}.
+# v2 (2026-08-05..): {kind, status, prior_p_<target>, why, result}; desk items born-and-closed
+# in one line; verdict = explicit outcome word OR the result's leading word (strict whitelist).
+def prior_of(l):
+    if "prior" in l: return l["prior"]
+    for k in l:
+        if k.startswith("prior_p_"): return l[k]
+    return None
+
+_HEADS = {"CLEARED": "cleared", "FAILED": "failed", "DEAD": "failed", "KILLED": "failed"}
+def verdict_of(l):
+    w = l.get("outcome") or ""
+    if w.startswith("cleared"): return "cleared"
+    if w.startswith("failed"):  return "failed"
+    if l.get("status") == "closed":
+        head = ((l.get("result") or "").split() or [""])[0].strip(".,;:—-*")
+        return _HEADS.get(head)
+    return None
+
+def crit_of(pre):
+    return pre.get("criterion") or pre.get("why") or ""
+
 def classify(outcome, note):
     t = (note or "").replace("−", "-").replace("–", "-")
     if DECISIVE.search(t): return "decisive"          # a refutation is information — breaks a streak
@@ -99,13 +122,14 @@ def pair(lines):
     resolved, inflight = [], []
     for i in order:
         ls = by[i]
-        priors = [l for l in ls if "prior" in l]
-        outs = [l for l in ls if "outcome" in l]
-        terms = [l for l in outs if l.get("outcome") in TERMINAL]
+        priors = [l for l in ls if prior_of(l) is not None]
+        terms = [l for l in ls if verdict_of(l) is not None]
         if terms:
             resolved.append({"id": i, "pre": priors[0] if priors else {}, "res": terms[-1]})
-        elif any(l.get("outcome") in ("void", "amended-before-running") for l in outs):
+        elif any(l.get("outcome") in ("void", "amended-before-running") for l in ls):
             continue                                   # no information / superseded — out of every invariant
+        elif any(l.get("status") == "closed" or l.get("outcome") == "closed" for l in ls):
+            continue                                   # closed without a whitelisted verdict — unscorable, out
         elif priors:
             inflight.append({"id": i, "pre": priors[0]})
     return resolved, inflight
@@ -116,7 +140,7 @@ def gate_of(pre, noise):
     if isinstance(pre.get("gate"), (int, float)):
         u = pre.get("unit") or (noise[0]["unit"] if noise else "")
         return abs(float(pre["gate"])), u, "explicit"
-    crit = (pre.get("criterion") or "").replace("−", "-")
+    crit = crit_of(pre).replace("−", "-")
     for nz in noise:
         u = nz.get("unit") or ""
         if not u or u not in crit: continue
@@ -139,7 +163,7 @@ def on_class(pre, noise):
     """A probe is on-class for the streak when its gate speaks the program's primary
     metric (the noise unit appears in its criterion). Validity gates, ship checks and
     infra probes are real work but must not dilute or break an instrument-limited streak."""
-    crit = pre.get("criterion") or ""
+    crit = crit_of(pre)
     return any((nz.get("unit") or "") in crit for nz in noise if nz.get("unit"))
 
 def main():
@@ -166,7 +190,7 @@ def main():
     # ── PARK-STREAK ──
     pool = [r for r in resolved if on_class(r["pre"], noise)] if noise else resolved
     off_class = len(resolved) - len(pool)
-    seq = [(r["id"], classify(r["res"].get("outcome"), r["res"].get("note")), r["res"].get("ts", "")) for r in pool]
+    seq = [(r["id"], classify(verdict_of(r["res"]), r["res"].get("note") or r["res"].get("result")), r["res"].get("ts", "")) for r in pool]
     unclassified = [i for i, c, _ in seq if c == "unclassified"]
     classified = [(i, c, t) for i, c, t in seq if c != "unclassified"]
     cur, cur_ids = 0, []

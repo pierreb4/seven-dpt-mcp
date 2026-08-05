@@ -58,6 +58,29 @@ SPLIT = sys.argv[sys.argv.index("--split") + 1] if "--split" in sys.argv else No
 def logit(p):   return math.log(p / (1.0 - p))
 def sigmoid(x): return 1.0 / (1.0 + math.exp(-x))
 
+# ---- ledger dialects --------------------------------------------------------------------------
+# v1 (2026-07-21..08-04): two lines/probe — {prior, criterion, why} then {outcome, note}.
+# v2 (2026-08-05..):      {kind, status: open|partial|closed, prior_p_<target>, why, result};
+#                         desk items are born-and-closed in ONE line; the verdict is either an
+#                         explicit `outcome` word or the RESULT'S LEADING WORD. Only an exact
+#                         whitelist is scored — CAUTION/MIXED/PARTIAL heads stay excluded,
+#                         visibly, rather than guessed.
+def prior_of(l):
+    if "prior" in l: return l["prior"]
+    for k in l:
+        if k.startswith("prior_p_"): return l[k]
+    return None
+
+_HEADS = {"CLEARED": 1, "FAILED": 0, "DEAD": 0, "KILLED": 0}
+def verdict_of(l):
+    w = l.get("outcome") or ""
+    if w.startswith("cleared"): return 1
+    if w.startswith("failed"):  return 0
+    if l.get("status") == "closed":
+        head = ((l.get("result") or "").split() or [""])[0].strip(".,;:—-*")
+        return _HEADS.get(head)
+    return None
+
 def wilson(k, n, z=1.96):
     if n == 0: return (0.0, 1.0)
     p = k / n; z2 = z * z
@@ -78,27 +101,29 @@ for line in open(LEDGER):
 
 resolved, voids, amended, inflight, corrections, multi_terminal, void_then_adjudicated = \
     [], [], [], [], [], [], []
-relabeled = []
+relabeled, closed_unscorable = [], []
 for pid in order:
     lines = by_id[pid]
-    priors    = [l for l in lines if "prior" in l]
-    outs      = [l for l in lines if "outcome" in l]
-    terminals = [l for l in outs if l["outcome"] in TERMINAL]
-    verdicts  = [l for l in outs if l["outcome"] in TERMINAL or l["outcome"] == "relabel"]
-    corrections += [pid for l in outs if l["outcome"] == "correction"]
+    priors    = [l for l in lines if prior_of(l) is not None]
+    outs      = [l for l in lines if "outcome" in l or l.get("status") == "closed"]
+    terminals = [l for l in outs if verdict_of(l) is not None]
+    verdicts  = [l for l in outs if verdict_of(l) is not None or l.get("outcome") == "relabel"]
+    corrections += [pid for l in outs if l.get("outcome") == "correction"]
     if not priors:
         continue  # outcome-only id (shouldn't happen; visible via line-count check below)
     prior = priors[-1]
-    if verdicts and verdicts[-1]["outcome"] == "relabel":
+    if verdicts and verdicts[-1].get("outcome") == "relabel":
         relabeled.append(pid)
     elif terminals:
         if len(terminals) > 1: multi_terminal.append(pid)
-        if any(l["outcome"] == "void" for l in outs): void_then_adjudicated.append(pid)
-        resolved.append({"id": pid, "ts": prior["ts"], "p": float(prior["prior"]),
-                         "y": 1 if terminals[-1]["outcome"] == "cleared" else 0,
+        if any(l.get("outcome") == "void" for l in outs): void_then_adjudicated.append(pid)
+        resolved.append({"id": pid, "ts": prior["ts"], "p": float(prior_of(prior)),
+                         "y": verdict_of(terminals[-1]),
                          "ct": prior.get("claimType") or prior.get("scope")})
-    elif any(l["outcome"] == "void" for l in outs):                   voids.append(pid)
-    elif any(l["outcome"] == "amended-before-running" for l in outs): amended.append(pid)
+    elif any(l.get("outcome") == "void" for l in outs):                   voids.append(pid)
+    elif any(l.get("outcome") == "amended-before-running" for l in outs): amended.append(pid)
+    elif any(l.get("status") == "closed" or l.get("outcome") == "closed" for l in lines):
+        closed_unscorable.append(pid)  # closed without a whitelisted verdict word
     else:                                                             inflight.append(pid)
 
 resolved.sort(key=lambda r: r["ts"])
@@ -202,6 +227,8 @@ print(f"            amended-before-running: {_lst(amended)}")
 print(f"            in-flight: {_lst(inflight)}")
 if relabeled:
     print(f"            relabel-superseded (audit re-graded NULL-EQUIVALENT; off the curve): {_lst(relabeled)}")
+if closed_unscorable:
+    print(f"            closed-unscorable (no whitelisted verdict word — CAUTION/MIXED/etc.): {_lst(closed_unscorable)}")
 if corrections:    print(f"  note-corrections seen (verdict untouched): {_lst(corrections)}")
 if multi_terminal: print(f"  multi-terminal ids (LAST adjudication used): {_lst(multi_terminal)}")
 if void_then_adjudicated:
