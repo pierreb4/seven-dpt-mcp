@@ -87,11 +87,12 @@ def prior_of(l):
     if "prior" in l: return l["prior"]
     for k in l:
         if k.startswith("prior_p_"): return l[k]
+        if k.startswith("p_") and not k.endswith("_was"): return l[k]   # v3 (see calibration.py)
     return None
 
 _HEADS = {"CLEARED": "cleared", "FAILED": "failed", "DEAD": "failed", "KILLED": "failed"}
 def verdict_of(l):
-    w = l.get("outcome") or ""
+    w = l.get("outcome") or l.get("resolution") or ""
     if w.startswith("cleared"): return "cleared"
     if w.startswith("failed"):  return "failed"
     if l.get("status") == "closed":
@@ -126,7 +127,8 @@ def pair(lines):
         terms = [l for l in ls if verdict_of(l) is not None]
         if terms:
             resolved.append({"id": i, "pre": priors[0] if priors else {}, "res": terms[-1]})
-        elif any(l.get("outcome") in ("void", "amended-before-running") for l in ls):
+        elif any(l.get("outcome") in ("void", "amended-before-running")
+                 or (l.get("resolution") or "").lower().startswith("void") for l in ls):
             continue                                   # no information / superseded — out of every invariant
         elif any(l.get("status") == "closed" or l.get("outcome") == "closed" for l in ls):
             continue                                   # closed without a whitelisted verdict — unscorable, out
@@ -177,7 +179,7 @@ def main():
         if not raw: continue
         try: l = json.loads(raw)
         except ValueError: continue
-        if asof and (l.get("ts") or "") > asof: continue
+        if asof and (l.get("ts") or l.get("date") or "") > asof: continue
         lines.append(l)
     resolved, inflight = pair(lines)
     noise = load_noise()
@@ -190,7 +192,7 @@ def main():
     # ── PARK-STREAK ──
     pool = [r for r in resolved if on_class(r["pre"], noise)] if noise else resolved
     off_class = len(resolved) - len(pool)
-    seq = [(r["id"], classify(verdict_of(r["res"]), r["res"].get("note") or r["res"].get("result")), r["res"].get("ts", "")) for r in pool]
+    seq = [(r["id"], classify(verdict_of(r["res"]), r["res"].get("note") or r["res"].get("result") or r["res"].get("observed")), r["res"].get("ts") or r["res"].get("date", "")) for r in pool]
     unclassified = [i for i, c, _ in seq if c == "unclassified"]
     classified = [(i, c, t) for i, c, t in seq if c != "unclassified"]
     cur, cur_ids = 0, []

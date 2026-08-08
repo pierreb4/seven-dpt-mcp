@@ -65,21 +65,30 @@ def sigmoid(x): return 1.0 / (1.0 + math.exp(-x))
 #                         explicit `outcome` word or the RESULT'S LEADING WORD. Only an exact
 #                         whitelist is scored — CAUTION/MIXED/PARTIAL heads stay excluded,
 #                         visibly, rather than guessed.
+# v3 (2026-08-07.., shared-launch file): prereg carries the prior as a bare `p_<target>` key
+#                         and `date` instead of `ts`; resolutions are `resolution: <word>` lines
+#                         echoing the prior as `p_*_was` (never a prior source). Scored words:
+#                         cleared/failed only; `void*` → void; held/stop/parked stay non-terminal
+#                         (parked-with-wake reads as in-flight — the wake owns reopening).
 def prior_of(l):
     if "prior" in l: return l["prior"]
     for k in l:
         if k.startswith("prior_p_"): return l[k]
+        if k.startswith("p_") and not k.endswith("_was"): return l[k]
     return None
 
 _HEADS = {"CLEARED": 1, "FAILED": 0, "DEAD": 0, "KILLED": 0}
 def verdict_of(l):
-    w = l.get("outcome") or ""
+    w = l.get("outcome") or l.get("resolution") or ""
     if w.startswith("cleared"): return 1
     if w.startswith("failed"):  return 0
     if l.get("status") == "closed":
         head = ((l.get("result") or "").split() or [""])[0].strip(".,;:—-*")
         return _HEADS.get(head)
     return None
+
+def is_void(l):
+    return l.get("outcome") == "void" or (l.get("resolution") or "").lower().startswith("void")
 
 def wilson(k, n, z=1.96):
     if n == 0: return (0.0, 1.0)
@@ -105,7 +114,7 @@ relabeled, closed_unscorable = [], []
 for pid in order:
     lines = by_id[pid]
     priors    = [l for l in lines if prior_of(l) is not None]
-    outs      = [l for l in lines if "outcome" in l or l.get("status") == "closed"]
+    outs      = [l for l in lines if "outcome" in l or "resolution" in l or l.get("status") == "closed"]
     terminals = [l for l in outs if verdict_of(l) is not None]
     verdicts  = [l for l in outs if verdict_of(l) is not None or l.get("outcome") == "relabel"]
     corrections += [pid for l in outs if l.get("outcome") == "correction"]
@@ -116,11 +125,11 @@ for pid in order:
         relabeled.append(pid)
     elif terminals:
         if len(terminals) > 1: multi_terminal.append(pid)
-        if any(l.get("outcome") == "void" for l in outs): void_then_adjudicated.append(pid)
-        resolved.append({"id": pid, "ts": prior["ts"], "p": float(prior_of(prior)),
+        if any(is_void(l) for l in outs): void_then_adjudicated.append(pid)
+        resolved.append({"id": pid, "ts": prior.get("ts") or prior.get("date"), "p": float(prior_of(prior)),
                          "y": verdict_of(terminals[-1]),
                          "ct": prior.get("claimType") or prior.get("scope")})
-    elif any(l.get("outcome") == "void" for l in outs):                   voids.append(pid)
+    elif any(is_void(l) for l in outs):                                   voids.append(pid)
     elif any(l.get("outcome") == "amended-before-running" for l in outs): amended.append(pid)
     elif any(l.get("status") == "closed" or l.get("outcome") == "closed" for l in lines):
         closed_unscorable.append(pid)  # closed without a whitelisted verdict word
