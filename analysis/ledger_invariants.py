@@ -21,6 +21,13 @@ Reads the same two-line JSONL ledger as calibration.py (pre-registration lines c
                 liveness (`channel` [+ `liveness`] fields on the prereg line) — the
                 discipline that prevents optimizing a channel that is 0% of the live path.
                 Coverage is reported; missing stamps WARN (ALERT with CHANNEL_STRICT=1).
+  EVENT DIALECT v3.1 resolution events ({"event":"resolution","status":..}) are unscored
+                BY CHOICE while every status observed (2026-08-08..10) is GRAY-class — a
+                pre-declared power statement — or a pre-push kill (void-class, never ran):
+                those ids correctly read as in-flight. A status outside that vocabulary
+                may be a scoreable terminal the parsers cannot see: ALERT — absorb the
+                dialect here + calibration.py and re-point wake sparks #34/#41 before
+                trusting n.
   ORPHANED-EXISTENTIAL (seven-dpt store): a parked spark with a wakeCondition but no
                 `exhaustion` statement can revive but never die — unfalsifiable-in-practice
                 spend (scope-leak census 2026-08-01: L=12.8-20.5%, gate cleared). Universal
@@ -249,6 +256,27 @@ def main():
     elif missing:
         print("  WARN: unstamped levers can optimize a dead channel undetected — add `channel` (+`liveness`) at registration")
     out["channel"] = {"stamped": len(stamped), "total": len(allpre)}
+
+    # ── EVENT-DIALECT TRIPWIRE (v3.1: {"event":"resolution","status":..}) ──
+    # Unscored BY CHOICE: every observed status is GRAY-class (pre-declared power
+    # statement) or a pre-push kill (void-class), so these ids correctly read as
+    # in-flight and n stays honest. A status outside that vocabulary is the moment
+    # the choice stops being safe — a scoreable terminal verdict_of cannot see
+    # would silently stick n and starve the wake greps watching the old form.
+    ev_n, ev_unknown = 0, []
+    for l in lines:
+        if l.get("event") != "resolution": continue
+        ev_n += 1
+        s = l.get("status") or ""
+        if not (s.startswith("GRAY") or "PREPUSH" in s):
+            ev_unknown.append((l.get("id") or "?", s))
+    if ev_n:
+        tagline = (f"UNKNOWN STATUS: {len(ev_unknown)}" if ev_unknown else
+                   "all inside the known non-scored vocabulary (GRAY*, *PREPUSH*)")
+        print(f"\nEVENT DIALECT  {ev_n} event-style resolutions · {tagline}")
+    for i, s in ev_unknown:
+        alerts.append(f"ALERT event-dialect: '{i}' resolved event-style with status '{s}' — outside the known non-scored vocabulary (GRAY*, *PREPUSH*); verdict_of cannot read it: the id stays in-flight, calibration n sticks, and the spark #34/#41 wake patterns miss it. If terminal: absorb v3.1 into calibration.py + ledger_invariants.py and re-point the wakes before trusting n")
+    out["event_dialect"] = {"n": ev_n, "unknown": [i for i, _ in ev_unknown]}
 
     # ── ORPHANED EXISTENTIALS (seven-dpt store, if present) ──
     store_p = os.environ.get("SEVEN_DPT_DB") or os.path.join(
