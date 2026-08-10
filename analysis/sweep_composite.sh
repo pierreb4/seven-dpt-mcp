@@ -16,7 +16,11 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 COMPOSITE="$TMP/prior-ledger-composite.jsonl"
-cat "$A" "$B" > "$COMPOSITE"
+# Exact-duplicate lines dedupe (first occurrence wins, order kept): since 2026-08-09
+# arc keeps the two files as synced copies, so a plain cat would double-read every id.
+# Diverged (non-identical) lines both survive, and per-id last-wins gives the later
+# file (B, the active one) precedence — correct in both worlds.
+awk '!seen[$0]++' "$A" "$B" > "$COMPOSITE"
 
 mkdir -p "$OUTDIR"
 printf '{"scope":"composite","built":"%s","sources":[{"path":"%s","lines":%s,"sha1":"%s"},{"path":"%s","lines":%s,"sha1":"%s"}]}\n' \
