@@ -17,17 +17,26 @@ Reads the same two-line JSONL ledger as calibration.py (pre-registration lines c
                 effect magnitude parsed near the unit in `criterion`) is below the banked
                 MDE is unresolvable BEFORE it runs. ALERT for in-flight probes; historical
                 ones are tallied retrodictively. Needs a noise model; skipped without one.
+  POWER-v2      (spark #35, 2026-08-11) unit-agnostic and needs NO banked noise model: a
+                prereg that states its own arm SE in criterion text ("SE ~3.2pp") with a
+                bar below 2*SE is a COIN-FLIP-GATE — the verdict is a coin toss as
+                designed (ksearch-draw1 is the exemplar the unit-bound check missed).
+                In-flight ALERTs; historical tallied. Unitless SE mentions are counted
+                but not judged (no bar-matching without a unit token) — reported, so the
+                check's own blind spot is visible.
   CHANNEL STAMP a lever should name the channel it acts through and that channel's measured
                 liveness (`channel` [+ `liveness`] fields on the prereg line) — the
                 discipline that prevents optimizing a channel that is 0% of the live path.
                 Coverage is reported; missing stamps WARN (ALERT with CHANNEL_STRICT=1).
-  EVENT DIALECT v3.1 resolution events ({"event":"resolution","status":..}) are unscored
-                BY CHOICE while every status observed (2026-08-08..10) is GRAY-class — a
-                pre-declared power statement — or a pre-push kill (void-class, never ran):
-                those ids correctly read as in-flight. A status outside that vocabulary
-                may be a scoreable terminal the parsers cannot see: ALERT — absorb the
-                dialect here + calibration.py and re-point wake sparks #34/#41 before
-                trusting n.
+  EVENT DIALECT v3.1 event lines ABSORBED 2026-08-11 (fired same morning: keyframe-stage1-reader
+                FAILED-BY-BARS was the first scoreable event-terminal). {"event":"resolution",
+                "status":..} is the verdict channel — heads FAILED*/CLEARED* score, VOID*/
+                *PREPUSH* read void, GRAY*/SUBSTRATE-* are terminal-non-scored (power
+                statement / feasibility answer), kind="substrate" preregs never score.
+                Non-resolution events are bookkeeping (ignored) except *KILLED*/*PREPUSH*
+                event values (void). The tripwire remains armed for the NEXT drift: a
+                resolution status no head rule maps ALERTs — extend event_class in BOTH
+                parsers (calibration.py mirrors) and re-check wake sparks #34/#41 patterns.
   ORPHANED-EXISTENTIAL (seven-dpt store): a parked spark with a wakeCondition but no
                 `exhaustion` statement can revive but never die — unfalsifiable-in-practice
                 spend (scope-leak census 2026-08-01: L=12.8-20.5%, gate cleared). Universal
@@ -97,8 +106,27 @@ def prior_of(l):
         if k.startswith("p_") and not k.endswith("_was"): return l[k]   # v3 (see calibration.py)
     return None
 
+def event_class(l):
+    """v3.1 event lines (mirrors calibration.py). None if l is not an event line; else
+    'cleared'/'failed' (scoreable), 'void', 'nonscored' (terminal power statement /
+    feasibility answer), 'ignore' (bookkeeping), 'unknown' (tripwire territory)."""
+    ev = l.get("event")
+    if not ev: return None
+    if ev != "resolution":
+        return "void" if ("KILLED" in ev or "PREPUSH" in ev) else "ignore"
+    s = (l.get("status") or "").upper()
+    if s.startswith("VOID") or "PREPUSH" in s: return "void"
+    if s.startswith("GRAY") or s.startswith("SUBSTRATE"): return "nonscored"
+    if s.startswith("FAILED"): return "failed"
+    if s.startswith("CLEARED"): return "cleared"
+    return "unknown"
+
 _HEADS = {"CLEARED": "cleared", "FAILED": "failed", "DEAD": "failed", "KILLED": "failed"}
 def verdict_of(l):
+    ec = event_class(l)
+    if ec in ("cleared", "failed"): return ec
+    if ec == "nonscored": return "gray"   # terminal; PARK-STREAK classifies from the note
+    if ec is not None: return None        # void / ignore / unknown
     w = l.get("outcome") or l.get("resolution") or ""
     if w.startswith("cleared"): return "cleared"
     if w.startswith("failed"):  return "failed"
@@ -111,7 +139,13 @@ def crit_of(pre):
     return pre.get("criterion") or pre.get("why") or ""
 
 def classify(outcome, note):
+    if outcome == "relabel": return "inside_noise"    # the relabel convention (2026-08-02) IS a
+                                                      # re-grade to NULL-EQUIVALENT — by construction
     t = (note or "").replace("−", "-").replace("–", "-")
+    if "NULL-EQUIVALENT" in t: return "inside_noise"  # audit's own token: sub-MDE by definition —
+                                                      # checked BEFORE the decisive regex (spark #35:
+                                                      # ksearch's KILL-leg prose read as decisive and
+                                                      # broke a streak the program itself calls a wall)
     if DECISIVE.search(t): return "decisive"          # a refutation is information — breaks a streak
     m = CI.search(t)
     if m and float(m.group(1)) <= 0 <= float(m.group(2)): return "inside_noise"
@@ -131,11 +165,19 @@ def pair(lines):
     for i in order:
         ls = by[i]
         priors = [l for l in ls if prior_of(l) is not None]
-        terms = [l for l in ls if verdict_of(l) is not None]
+        substrate = any(l.get("kind") == "substrate" for l in ls)
+        terms = [l for l in ls if verdict_of(l) is not None
+                 or (substrate and l.get("event") == "resolution"
+                     and event_class(l) != "void")]   # measurement draw: any resolution is terminal
+        # relabel-supersede mirror (calibration.py, spark #35): a later relabel line is the
+        # LAST adjudication — its NULL-EQUIVALENT note is what the streak should read, not
+        # the superseded terminal's prose.
+        verdictish = [l for l in ls if l in terms or l.get("outcome") == "relabel"]
         if terms:
-            resolved.append({"id": i, "pre": priors[0] if priors else {}, "res": terms[-1]})
+            resolved.append({"id": i, "pre": priors[0] if priors else {}, "res": verdictish[-1]})
         elif any(l.get("outcome") in ("void", "amended-before-running")
-                 or (l.get("resolution") or "").lower().startswith("void") for l in ls):
+                 or (l.get("resolution") or "").lower().startswith("void")
+                 or event_class(l) == "void" for l in ls):
             continue                                   # no information / superseded — out of every invariant
         elif any(l.get("status") == "closed" or l.get("outcome") == "closed" for l in ls):
             continue                                   # closed without a whitelisted verdict — unscorable, out
@@ -199,7 +241,7 @@ def main():
     # ── PARK-STREAK ──
     pool = [r for r in resolved if on_class(r["pre"], noise)] if noise else resolved
     off_class = len(resolved) - len(pool)
-    seq = [(r["id"], classify(verdict_of(r["res"]), r["res"].get("note") or r["res"].get("result") or r["res"].get("observed")), r["res"].get("ts") or r["res"].get("date", "")) for r in pool]
+    seq = [(r["id"], classify(verdict_of(r["res"]) or r["res"].get("outcome"), r["res"].get("note") or r["res"].get("result") or r["res"].get("observed")), r["res"].get("ts") or r["res"].get("date", "")) for r in pool]
     unclassified = [i for i, c, _ in seq if c == "unclassified"]
     classified = [(i, c, t) for i, c, t in seq if c != "unclassified"]
     cur, cur_ids = 0, []
@@ -245,6 +287,38 @@ def main():
                         "predetermined": [{"id": i, "gate": g, "mde": m} for i, g, m in weak_hist],
                         "unparsed_ids": unparsed}
 
+    # ── POWER-v2: SELF-STATED SE (spark #35 — needs no banked noise model) ──
+    # A prereg that states its own arm SE has priced its noise; a bar below 2*SE makes
+    # the verdict a coin toss BY DESIGN. Judged only when the SE carries a unit token the
+    # bar can be matched on; unitless mentions are counted, not judged — visible blind spot.
+    SE_RX = re.compile(r"SE\s*[~≈=]?\s*\+?/?-?\s*([0-9]+(?:\.[0-9]+)?)\s*(pp|/game)?", re.I)
+    cfg_hist, cfg_unitless = [], []
+    for bucket, rows in (("in-flight", inflight), ("resolved", resolved)):
+        for r in rows:
+            crit = crit_of(r["pre"]).replace("−", "-")
+            m = SE_RX.search(crit)
+            if not m: continue
+            se, unit = float(m.group(1)), m.group(2)
+            best = None
+            if unit:
+                for g in re.finditer(r"([0-9]+(?:\.[0-9]+)?)\s*" + re.escape(unit), crit):
+                    if m.start() <= g.start() < m.end() + 2: continue   # the SE phrase itself
+                    v = abs(float(g.group(1)))
+                    if 0 < v < 100 and (best is None or v < best): best = v
+            if best is None:
+                cfg_unitless.append(r["id"]); continue
+            if best < 2 * se:
+                if bucket == "in-flight":
+                    alerts.append(f"ALERT coin-flip-gate: in-flight '{r['id']}' bar {best}{unit} < 2*SE = {2*se:.1f}{unit} (self-stated) — unresolvable as designed; widen the bar or pool more draws before running")
+                else:
+                    cfg_hist.append((r["id"], best, se, unit))
+    if cfg_hist or cfg_unitless:
+        print(f"  POWER-v2 (self-stated SE): {len(cfg_hist)} historical coin-flip gates"
+              + (f" ({', '.join(i for i, _, _, _ in cfg_hist[:5])}{'…' if len(cfg_hist) > 5 else ''})" if cfg_hist else "")
+              + (f" · SE stated but bar unmatchable (unitless): {len(cfg_unitless)}" if cfg_unitless else ""))
+    out["power_v2"] = {"coin_flip_hist": [{"id": i, "bar": b, "se": s, "unit": u} for i, b, s, u in cfg_hist],
+                       "unitless": cfg_unitless}
+
     # ── CHANNEL STAMP ──
     allpre = inflight + resolved
     stamped = [r for r in allpre if r["pre"].get("channel")]
@@ -257,26 +331,34 @@ def main():
         print("  WARN: unstamped levers can optimize a dead channel undetected — add `channel` (+`liveness`) at registration")
     out["channel"] = {"stamped": len(stamped), "total": len(allpre)}
 
-    # ── EVENT-DIALECT TRIPWIRE (v3.1: {"event":"resolution","status":..}) ──
-    # Unscored BY CHOICE: every observed status is GRAY-class (pre-declared power
-    # statement) or a pre-push kill (void-class), so these ids correctly read as
-    # in-flight and n stays honest. A status outside that vocabulary is the moment
-    # the choice stops being safe — a scoreable terminal verdict_of cannot see
-    # would silently stick n and starve the wake greps watching the old form.
-    ev_n, ev_unknown = 0, []
+    # ── EVENT-DIALECT TRIPWIRE (v3.1 ABSORBED 2026-08-11; the alert now guards the NEXT drift) ──
+    # event:"resolution" is the verdict channel and event_class maps its status heads;
+    # kind=substrate preregs never score; other event types are bookkeeping. A resolution
+    # status no rule maps is the moment the dialect has drifted again — a scoreable
+    # terminal the parsers cannot see would silently stick calibration n and starve the
+    # #34/#41 wake greps. ALERT and extend event_class in BOTH parsers before trusting n.
+    subst_ids = {l.get("id") for l in lines if l.get("kind") == "substrate"}
+    ev_types, ev_classes, ev_unknown = {}, {}, []
     for l in lines:
-        if l.get("event") != "resolution": continue
-        ev_n += 1
-        s = l.get("status") or ""
-        if not (s.startswith("GRAY") or "PREPUSH" in s):
-            ev_unknown.append((l.get("id") or "?", s))
-    if ev_n:
-        tagline = (f"UNKNOWN STATUS: {len(ev_unknown)}" if ev_unknown else
-                   "all inside the known non-scored vocabulary (GRAY*, *PREPUSH*)")
-        print(f"\nEVENT DIALECT  {ev_n} event-style resolutions · {tagline}")
+        ev = l.get("event")
+        if not ev: continue
+        ev_types[ev] = ev_types.get(ev, 0) + 1
+        if ev != "resolution": continue
+        ec = event_class(l)
+        if ec == "unknown" and l.get("id") in subst_ids: ec = "nonscored-kind"
+        ev_classes[ec] = ev_classes.get(ec, 0) + 1
+        if ec == "unknown":
+            ev_unknown.append((l.get("id") or "?", l.get("status") or ""))
+    if ev_types:
+        classes = " ".join(f"{k}:{v}" for k, v in sorted(ev_classes.items()))
+        others = " ".join(f"{k}:{v}" for k, v in sorted(ev_types.items()) if k != "resolution")
+        print(f"\nEVENT DIALECT  {ev_types.get('resolution', 0)} resolutions ({classes})"
+              + (f" · other events: {others}" if others else "")
+              + (f" · UNKNOWN STATUS: {len(ev_unknown)}" if ev_unknown else " · all mapped"))
     for i, s in ev_unknown:
-        alerts.append(f"ALERT event-dialect: '{i}' resolved event-style with status '{s}' — outside the known non-scored vocabulary (GRAY*, *PREPUSH*); verdict_of cannot read it: the id stays in-flight, calibration n sticks, and the spark #34/#41 wake patterns miss it. If terminal: absorb v3.1 into calibration.py + ledger_invariants.py and re-point the wakes before trusting n")
-    out["event_dialect"] = {"n": ev_n, "unknown": [i for i, _ in ev_unknown]}
+        alerts.append(f"ALERT event-dialect: '{i}' resolved event-style with status '{s}' — no head rule maps it (FAILED*/CLEARED*/VOID*/GRAY*/SUBSTRATE-*/*PREPUSH*; kind=substrate never scores): the id reads in-flight, calibration n sticks, and the #34/#41 wake patterns may miss it. Extend event_class in calibration.py + ledger_invariants.py and re-check the wake patterns before trusting n")
+    out["event_dialect"] = {"n": ev_types.get("resolution", 0), "classes": ev_classes,
+                            "types": ev_types, "unknown": [i for i, _ in ev_unknown]}
 
     # ── ORPHANED EXISTENTIALS (seven-dpt store, if present) ──
     store_p = os.environ.get("SEVEN_DPT_DB") or os.path.join(

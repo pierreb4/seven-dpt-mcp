@@ -33,4 +33,4 @@ echo "== composite: $(wc -l < "$COMPOSITE") lines ($(basename "$A"): $(wc -l < "
 echo "== calibration"
 ARC_PRIOR_LEDGER="$COMPOSITE" python3 "$HERE/calibration.py" --json "$@" >/dev/null
 echo "== invariants (STORE_STRICT=${STORE_STRICT:-1})"
-STORE_STRICT="${STORE_STRICT:-1}" ARC_PRIOR_LEDGER="$COMPOSITE" python3 "$HERE/ledger_invariants.py" --json | tail -14
+STORE_STRICT="${STORE_STRICT:-1}" ARC_PRIOR_LEDGER="$COMPOSITE" python3 "$HERE/ledger_invariants.py" --json | tail -16

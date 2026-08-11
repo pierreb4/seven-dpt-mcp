@@ -70,6 +70,29 @@ def sigmoid(x): return 1.0 / (1.0 + math.exp(-x))
 #                         echoing the prior as `p_*_was` (never a prior source). Scored words:
 #                         cleared/failed only; `void*` → void; held/stop/parked stay non-terminal
 #                         (parked-with-wake reads as in-flight — the wake owns reopening).
+# v3.1 (2026-08-08.., absorbed 2026-08-11): event lines. {"event":"resolution","status":<WORD>}
+#                         is the verdict channel; the status HEAD maps: FAILED*→0, CLEARED*→1,
+#                         VOID*/*PREPUSH*→void, GRAY*→terminal-non-scored (pre-declared power
+#                         statement), SUBSTRATE-*→terminal-non-scored (feasibility answer). A
+#                         prereg with kind="substrate" NEVER scores (measurement draw, not a
+#                         lever gate) whatever its status says. Non-resolution events (migration,
+#                         status-update) are bookkeeping — ignored — except *KILLED*/*PREPUSH*
+#                         event values, which read void. A resolution status no head rule maps
+#                         stays in-flight HERE; ledger_invariants.py owns the ALERT (tripwire).
+def event_class(l):
+    """None if l is not an event line; else 'cleared'/'failed' (scoreable), 'void',
+    'nonscored' (terminal but never on the curve), 'ignore' (bookkeeping), 'unknown'."""
+    ev = l.get("event")
+    if not ev: return None
+    if ev != "resolution":
+        return "void" if ("KILLED" in ev or "PREPUSH" in ev) else "ignore"
+    s = (l.get("status") or "").upper()
+    if s.startswith("VOID") or "PREPUSH" in s: return "void"
+    if s.startswith("GRAY") or s.startswith("SUBSTRATE"): return "nonscored"
+    if s.startswith("FAILED"): return "failed"
+    if s.startswith("CLEARED"): return "cleared"
+    return "unknown"
+
 def prior_of(l):
     if "prior" in l: return l["prior"]
     for k in l:
@@ -79,6 +102,9 @@ def prior_of(l):
 
 _HEADS = {"CLEARED": 1, "FAILED": 0, "DEAD": 0, "KILLED": 0}
 def verdict_of(l):
+    ec = event_class(l)
+    if ec is not None:
+        return {"cleared": 1, "failed": 0}.get(ec)
     w = l.get("outcome") or l.get("resolution") or ""
     if w.startswith("cleared"): return 1
     if w.startswith("failed"):  return 0
@@ -88,7 +114,8 @@ def verdict_of(l):
     return None
 
 def is_void(l):
-    return l.get("outcome") == "void" or (l.get("resolution") or "").lower().startswith("void")
+    return l.get("outcome") == "void" or (l.get("resolution") or "").lower().startswith("void") \
+        or event_class(l) == "void"
 
 def wilson(k, n, z=1.96):
     if n == 0: return (0.0, 1.0)
@@ -110,19 +137,23 @@ for line in open(LEDGER):
 
 resolved, voids, amended, inflight, corrections, multi_terminal, void_then_adjudicated = \
     [], [], [], [], [], [], []
-relabeled, closed_unscorable = [], []
+relabeled, closed_unscorable, event_nonscored = [], [], []
 for pid in order:
     lines = by_id[pid]
     priors    = [l for l in lines if prior_of(l) is not None]
-    outs      = [l for l in lines if "outcome" in l or "resolution" in l or l.get("status") == "closed"]
+    outs      = [l for l in lines if "outcome" in l or "resolution" in l or l.get("status") == "closed"
+                 or "event" in l]
     terminals = [l for l in outs if verdict_of(l) is not None]
     verdicts  = [l for l in outs if verdict_of(l) is not None or l.get("outcome") == "relabel"]
+    substrate = any(l.get("kind") == "substrate" for l in lines)
     corrections += [pid for l in outs if l.get("outcome") == "correction"]
     if not priors:
         continue  # outcome-only id (shouldn't happen; visible via line-count check below)
     prior = priors[-1]
     if verdicts and verdicts[-1].get("outcome") == "relabel":
         relabeled.append(pid)
+    elif terminals and substrate:
+        event_nonscored.append(pid)  # measurement draw: a scoreable word still never scores
     elif terminals:
         if len(terminals) > 1: multi_terminal.append(pid)
         if any(is_void(l) for l in outs): void_then_adjudicated.append(pid)
@@ -130,6 +161,9 @@ for pid in order:
                          "y": verdict_of(terminals[-1]),
                          "ct": prior.get("claimType") or prior.get("scope")})
     elif any(is_void(l) for l in outs):                                   voids.append(pid)
+    elif any(event_class(l) == "nonscored" for l in outs) or \
+         (substrate and any(l.get("event") == "resolution" for l in outs)):
+        event_nonscored.append(pid)  # GRAY power-statement / substrate answer — terminal, off the curve
     elif any(l.get("outcome") == "amended-before-running" for l in outs): amended.append(pid)
     elif any(l.get("status") == "closed" or l.get("outcome") == "closed" for l in lines):
         closed_unscorable.append(pid)  # closed without a whitelisted verdict word
@@ -144,7 +178,8 @@ print("seven-dpt #2  stated-prior calibration  (arc prior-ledger testbed)")
 print("=" * 86)
 print(f"  ledger: {LEDGER}")
 print(f"  ids: {len(by_id)} | resolved {n} | void {len(voids)} | amended-pre-run {len(amended)}"
-      f" | in-flight {len(inflight)} | relabel-superseded {len(relabeled)}")
+      f" | in-flight {len(inflight)} | relabel-superseded {len(relabeled)}"
+      f" | event-non-scored {len(event_nonscored)}")
 if n < 10:
     print(f"\n  only {n} resolved -- below any useful curve. Come back at >=20."); sys.exit(0)
 
@@ -238,6 +273,8 @@ if relabeled:
     print(f"            relabel-superseded (audit re-graded NULL-EQUIVALENT; off the curve): {_lst(relabeled)}")
 if closed_unscorable:
     print(f"            closed-unscorable (no whitelisted verdict word — CAUTION/MIXED/etc.): {_lst(closed_unscorable)}")
+if event_nonscored:
+    print(f"            event-resolved non-scored (GRAY power-statement / substrate measurement): {_lst(event_nonscored)}")
 if corrections:    print(f"  note-corrections seen (verdict untouched): {_lst(corrections)}")
 if multi_terminal: print(f"  multi-terminal ids (LAST adjudication used): {_lst(multi_terminal)}")
 if void_then_adjudicated:
