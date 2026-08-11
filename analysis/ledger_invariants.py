@@ -28,6 +28,19 @@ Reads the same two-line JSONL ledger as calibration.py (pre-registration lines c
                 liveness (`channel` [+ `liveness`] fields on the prereg line) — the
                 discipline that prevents optimizing a channel that is 0% of the live path.
                 Coverage is reported; missing stamps WARN (ALERT with CHANNEL_STRICT=1).
+  FAMILY MIX    (spark #45, 2026-08-11; Leek temperature-zero) the ledger is SELF-CENSORED
+                data — it holds only the probes we chose, so calibration measures prediction
+                of our own choices, never coverage of the lever space. This face audits the
+                CHOICE STREAM: every prereg (voids included — the choice was made) classified
+                into an idea-family (explicit `family` field wins; else retro id/criterion
+                rules; coverage reported). Emits exploration share (new-family preregs),
+                top-family concentration, and RE-ENTRY-WITHOUT-A-POSITIVE episodes: a family
+                reaching >=FAMILY_K preregs across >=2 levers with zero positives (walked in
+                file order, so the flag is dated to the prereg that crossed the bar — the
+                completion trio must flag before its last arm opened). An IN-FLIGHT prereg
+                sitting in such a family ALERTs: close it or state the continue reason.
+                Measures first; any exploration QUOTA (Leek's ~20%) is a Pierre/arc policy
+                call to be made on this meter's numbers, not shipped inside it.
   EVENT DIALECT v3.1 event lines ABSORBED 2026-08-11 (fired same morning: keyframe-stage1-reader
                 FAILED-BY-BARS was the first scoreable event-terminal). {"event":"resolution",
                 "status":..} is the verdict channel — heads FAILED*/CLEARED* score, VOID*/
@@ -185,6 +198,47 @@ def pair(lines):
             inflight.append({"id": i, "pre": priors[0]})
     return resolved, inflight
 
+# ── family classification (FAMILY MIX, spark #45) ────────────────────────────
+# Explicit `family` field wins. Retro rules are ordered, id-first with criterion
+# fallback, written against the live ledger 2026-08-11; unmatched ids stay "?"
+# VISIBLY (coverage is reported) rather than guessed into a bucket.
+FAMILY_RULES = [
+    (re.compile(r"untried|action7map|statearm|action-completion", re.I), "completion"),
+    (re.compile(r"keyframe|animserve|cortex|animtrace", re.I),           "animation-serving"),
+    (re.compile(r"colab-mtp|specdecode|ship-mtp", re.I),                 "substrate-serving"),
+    (re.compile(r"\blora", re.I),                                        "training"),
+    (re.compile(r"tfcal|corp-meter|scope-leak|aa-calib", re.I),          "instrument-calibration"),
+    (re.compile(r"^ship-", re.I),                                        "ship"),
+    (re.compile(r"verifier|objrepair", re.I),                            "verifier-repair"),
+    (re.compile(r"punctalpha|prefixtape", re.I),                         "prompt-compression"),
+    (re.compile(r"upscale", re.I),                                       "upscale"),
+    (re.compile(r"pheromone|blackboard|ksearch|cotick|repeatnote|coactor|^k\d-|frontier-tool", re.I), "kernel-prompt"),
+    (re.compile(r"allocator", re.I),                                     "allocator"),
+    (re.compile(r"bestofk", re.I),                                       "sampling"),
+    (re.compile(r"reaudit|surrogate-endpoint|score-law|hidden-sd", re.I), "desk-audit"),
+    (re.compile(r"tr87|targetceiling|followup-conversion", re.I),        "game-diagnosis"),
+    (re.compile(r"seed-determinism|harness-refit|hidden-replication|baseline-shift|seam-isolation|framework-seam", re.I), "harness-validity"),
+]
+LEVER_SUFFIX = re.compile(r"(-draw\d+|-pooled\d*|-stage[A-Za-z0-9]+|-tier\d+|-v\d+|-iter\d+.*|"
+                          r"-rerun.*|-p\d+|-probe|-hidden|-2026-\d\d-\d\d)+$")
+# Support families are validation/measurement SPEND, not idea bets: a validity probe that
+# fails resolved exactly as priced is the instrument WORKING, so "0 positives" carries no
+# concentration signal there. They stay in the shares (real spend) but never episode/ALERT.
+SUPPORT_FAMILIES = {"ship", "desk-audit", "instrument-calibration", "harness-validity",
+                    "game-diagnosis"}
+
+def lever_of(pid):
+    return LEVER_SUFFIX.sub("", pid)
+
+def family_of(pid, pre):
+    if pre.get("family"): return str(pre["family"])
+    for rx, fam in FAMILY_RULES:          # id first — criteria cite OTHER probes
+        if rx.search(pid): return fam     # (cortex's criterion names the verifier
+    crit = crit_of(pre)[:200]             # comparator; id rules must exhaust first)
+    for rx, fam in FAMILY_RULES:
+        if rx.search(crit): return fam
+    return "?"
+
 # ── gate extraction for the power check ──────────────────────────────────────
 NUM = re.compile(r"(-?\d+(?:\.\d+)?)")
 def gate_of(pre, noise):
@@ -330,6 +384,76 @@ def main():
     elif missing:
         print("  WARN: unstamped levers can optimize a dead channel undetected — add `channel` (+`liveness`) at registration")
     out["channel"] = {"stamped": len(stamped), "total": len(allpre)}
+
+    # ── FAMILY MIX (spark #45): audit the CHOICE STREAM the ledger censors everything else by ──
+    # Walk raw lines in file order (append-only ledger = chronological): preregs arrive,
+    # resolutions accrue evidence. Voids stay in the stream — the choice was spent. A family
+    # crossing >=FAMILY_K preregs / >=2 levers / 0 positives is a concentration episode; an
+    # in-flight prereg still sitting in one ALERTs (close it or state the continue reason).
+    fam_k = int(os.environ.get("FAMILY_K", 3))
+    seen_prereg, fam_stat, episodes, stream = set(), {}, [], []
+    stamped_fam = 0
+    for l in lines:
+        pid = l.get("id")
+        if pid is None: continue
+        if prior_of(l) is not None and pid not in seen_prereg:
+            seen_prereg.add(pid)
+            fam = family_of(pid, l)
+            if l.get("family"): stamped_fam += 1
+            lev = lever_of(pid)
+            st = fam_stat.setdefault(fam, {"preregs": 0, "levers": set(), "pos": 0, "flagged": False})
+            st["preregs"] += 1; st["levers"].add(lev)
+            new_fam = st["preregs"] == 1
+            stream.append({"id": pid, "ts": l.get("ts") or l.get("date") or "", "family": fam,
+                           "new_family": new_fam})
+            if (fam != "?" and fam not in SUPPORT_FAMILIES and not st["flagged"]
+                    and st["preregs"] >= fam_k and len(st["levers"]) >= 2 and st["pos"] == 0):
+                st["flagged"] = True
+                episodes.append({"family": fam, "at": pid, "preregs": st["preregs"],
+                                 "levers": len(st["levers"])})
+        elif pid in seen_prereg:
+            fam = next((s["family"] for s in stream if s["id"] == pid), None)
+            if fam and verdict_of(l) == "cleared":
+                fam_stat[fam]["pos"] += 1
+    n_stream = len(stream)
+    if n_stream:
+        classified = [s for s in stream if s["family"] != "?"]
+        cov = len(classified) / n_stream
+        fams = {}
+        for s in classified: fams[s["family"]] = fams.get(s["family"], 0) + 1
+        top_fam, top_n = (max(fams.items(), key=lambda kv: kv[1]) if fams else ("-", 0))
+        def share(rows):
+            rows = [s for s in rows if s["family"] != "?"]
+            return (sum(1 for s in rows if s["new_family"]) / len(rows)) if rows else 0.0
+        pre_era  = [s for s in stream if (s["ts"][:10] or "9999") < "2026-08-07"]
+        post_era = [s for s in stream if (s["ts"][:10]) >= "2026-08-07"]
+        print(f"\nFAMILY MIX  {n_stream} preregs · coverage {cov:.0%} ({len(fams)} families"
+              f" · top: {top_fam} {top_n/max(1,len(classified)):.0%})"
+              f" · family stamps {stamped_fam}/{n_stream}")
+        print(f"  exploration (new-family share): overall {share(stream):.0%}"
+              f" · pre-era {share(pre_era):.0%} · post-era {share(post_era):.0%}"
+              f" · last-10 {share(stream[-10:]):.0%}")
+        for e in episodes:
+            later = fam_stat[e["family"]]["pos"] > 0
+            e["later_cleared"] = later
+            print(f"  re-entry-without-a-positive: {e['family']} crossed {e['preregs']} preregs"
+                  f"/{e['levers']} levers/0 positives at '{e['at']}'"
+                  + (" — family later cleared" if later else ""))
+        if stamped_fam == 0:
+            print("  WARN: no `family` stamps — retro classification only; add `family` at registration (protocol ask)")
+        for s in stream:
+            fam = s["family"]
+            if fam == "?" or not fam_stat[fam]["flagged"]: continue
+            if any(r["id"] == s["id"] for r in inflight):
+                alerts.append(f"ALERT family-mix: in-flight '{s['id']}' sits in family '{fam}' with {fam_stat[fam]['preregs']} preregs/{len(fam_stat[fam]['levers'])} levers/0 positives — a live bet in an evidence-negative family: close it or state the continue reason on the ledger")
+        out["family_mix"] = {"n": n_stream, "coverage": round(cov, 2), "families": fams,
+                             "top": top_fam, "stamps": stamped_fam,
+                             "exploration_share": {"overall": round(share(stream), 3),
+                                                   "pre": round(share(pre_era), 3),
+                                                   "post": round(share(post_era), 3),
+                                                   "last10": round(share(stream[-10:]), 3)},
+                             "episodes": episodes,
+                             "unclassified": [s["id"] for s in stream if s["family"] == "?"]}
 
     # ── EVENT-DIALECT TRIPWIRE (v3.1 ABSORBED 2026-08-11; the alert now guards the NEXT drift) ──
     # event:"resolution" is the verdict channel and event_class maps its status heads;
