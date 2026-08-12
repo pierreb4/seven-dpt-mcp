@@ -117,6 +117,15 @@ def is_void(l):
     return l.get("outcome") == "void" or (l.get("resolution") or "").lower().startswith("void") \
         or event_class(l) == "void"
 
+def is_declined(l):
+    """Mirrors ledger_invariants.OUTCOME_DECLARED['declined'] (option 4, 2026-08-12):
+    decided WITHOUT running. Terminal and counted, but never scoreable — the run never
+    happened, so there is no ground truth to grade the stated prior against. Under the
+    register-then-refuse protocol these ids DO carry a prior, so without this branch they
+    would read in-flight forever."""
+    w = str(l.get("outcome") or l.get("resolution") or "").lower()
+    return w.startswith(("refused", "declined"))
+
 def is_substrate(l):
     """Mirrors ledger_invariants.py. `kind` is TOKENISED, not compared whole: a compound
     value (`substrate+pilot`, 2026-08-12) must still hit the substrate rule, or a
@@ -143,7 +152,7 @@ for line in open(LEDGER):
 
 resolved, voids, amended, inflight, corrections, multi_terminal, void_then_adjudicated = \
     [], [], [], [], [], [], []
-relabeled, closed_unscorable, event_nonscored = [], [], []
+relabeled, closed_unscorable, event_nonscored, declined = [], [], [], []
 for pid in order:
     lines = by_id[pid]
     priors    = [l for l in lines if prior_of(l) is not None]
@@ -153,6 +162,13 @@ for pid in order:
     verdicts  = [l for l in outs if verdict_of(l) is not None or l.get("outcome") == "relabel"]
     substrate = any(is_substrate(l) for l in lines)
     corrections += [pid for l in outs if l.get("outcome") == "correction"]
+    if any(is_declined(l) for l in outs):
+        declined.append(pid); continue   # terminal WITH OR WITHOUT a prior. Checked before the
+                                         # no-prior guard on purpose: the register-then-refuse
+                                         # protocol asks for a prior, but a refusal that skipped
+                                         # it is still a refusal, and dropping it here would make
+                                         # this header disagree with the invariants DECLINED face
+                                         # (it did: `declined 0` vs `DECLINED 1`, 2026-08-12).
     if not priors:
         continue  # outcome-only id (shouldn't happen; visible via line-count check below)
     prior = priors[-1]
@@ -185,7 +201,7 @@ print("=" * 86)
 print(f"  ledger: {LEDGER}")
 print(f"  ids: {len(by_id)} | resolved {n} | void {len(voids)} | amended-pre-run {len(amended)}"
       f" | in-flight {len(inflight)} | relabel-superseded {len(relabeled)}"
-      f" | event-non-scored {len(event_nonscored)}")
+      f" | event-non-scored {len(event_nonscored)} | declined {len(declined)}")
 if n < 10:
     print(f"\n  only {n} resolved -- below any useful curve. Come back at >=20."); sys.exit(0)
 

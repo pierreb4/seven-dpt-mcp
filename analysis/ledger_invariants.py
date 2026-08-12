@@ -170,6 +170,14 @@ OUTCOME_DECLARED = {
     "protocol": "annotation", "parked": "annotation", "held": "annotation",
     "stop": "annotation", "amended-before-resolution": "annotation",
     "progress": "in-progress",
+    # DECLINED (2026-08-12): decided WITHOUT running. Never scores — the run never
+    # happened, so there is no ground truth to grade a prior against — but it is TERMINAL
+    # and it is COUNTED. A ledger that records what it ran and not what it declined can
+    # never audit its own refusals, and on a programme where running is the expensive move
+    # that is where much of the value lives. Protocol (option 4, Pierre 2026-08-12):
+    # REGISTER the prereg with the prior you intended, THEN refuse — the prior survives,
+    # so "we thought p=0.4 and declined; were we right?" stays answerable later.
+    "refused-by-evidence": "declined", "refused": "declined", "declined": "declined",
 }
 _DECL_ORDER = sorted(OUTCOME_DECLARED, key=len, reverse=True)   # longest prefix wins
 
@@ -182,6 +190,9 @@ def outcome_class(w):
     for k in _DECL_ORDER:
         if lw.startswith(k): return OUTCOME_DECLARED[k]
     return "NEW"
+
+def is_declined(l):
+    return outcome_class(outcome_word(l)) == "declined"
 
 # Registration kinds seen in the live ledger 2026-08-12. Kind is TOKENISED, not compared
 # whole: `substrate+pilot` must still hit the substrate rule, or a measurement draw scores
@@ -239,6 +250,9 @@ def pair(lines):
                  or (l.get("resolution") or "").lower().startswith("void")
                  or event_class(l) == "void" for l in ls):
             continue                                   # no information / superseded — out of every invariant
+        elif any(is_declined(l) for l in ls):
+            continue                                   # decided WITHOUT running: terminal, never
+                                                       # scoreable, counted on its own DECLINED face
         elif any(l.get("status") == "closed" or l.get("outcome") == "closed" for l in ls):
             continue                                   # closed without a whitelisted verdict — unscorable, out
         elif priors:
@@ -568,6 +582,38 @@ def main():
     out["outcome_dialect"] = {"classes": {c: sum(d.values()) for c, d in w_cls.items()},
                               "words": {c: d for c, d in w_cls.items()},
                               "new": {k: sorted(set(v)) for k, v in w_new.items()}}
+
+    # ── DECLINED (option 4, 2026-08-12) ──
+    # A decline never scores (the run never happened — no ground truth), but the PRIOR is
+    # the whole audit. Comparing priors-on-declined against priors-on-run answers the
+    # question the ledger could not previously ask: are we systematically walking away
+    # from bets we rated well, or correctly killing the ones we rated badly? A decline
+    # with no prior is uncountable in that comparison, so it raises the protocol ask.
+    dec_ids = []
+    for l in lines:
+        if is_declined(l) and l.get("id") not in dec_ids:
+            dec_ids.append(l.get("id") or "?")
+    if dec_ids:
+        dec_p = {}
+        for i in dec_ids:
+            pr = [prior_of(l) for l in lines if l.get("id") == i and prior_of(l) is not None]
+            dec_p[i] = pr[0] if pr else None
+        named = ", ".join(f"{i} (p={dec_p[i]})" if dec_p[i] is not None else f"{i} (NO PRIOR)"
+                          for i in dec_ids)
+        print(f"\nDECLINED  {len(dec_ids)} decided without running · {named}")
+        withp = [p for p in dec_p.values() if p is not None]
+        ranp  = [float(prior_of(r["pre"])) for r in resolved if prior_of(r.get("pre") or {}) is not None]
+        if withp and ranp:
+            print(f"  mean prior — declined {sum(withp)/len(withp):.2f} vs run {sum(ranp)/len(ranp):.2f}"
+                  f" (n {len(withp)}/{len(ranp)}): declining ABOVE the run mean is the shape worth explaining")
+        miss = [i for i in dec_ids if dec_p[i] is None]
+        if miss:
+            print(f"  WARN: no prior on {', '.join(miss)} — per the register-then-refuse protocol,"
+                  f" register the prereg with the prior you intended and THEN refuse; without it the"
+                  f" decline is counted but 'were we right to decline?' stays unanswerable")
+        out["declined"] = {"ids": dec_ids, "priors": dec_p,
+                           "mean_prior": round(sum(withp)/len(withp), 3) if withp else None,
+                           "no_prior": miss}
 
     # ── KIND CENSUS ── kind is tokenised, so a compound value still hits its rules; an
     # unrecognised token is the moment a new registration class appears, and if it means
