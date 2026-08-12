@@ -148,6 +148,53 @@ def verdict_of(l):
         return _HEADS.get(head)
     return None
 
+# ── OUTCOME / KIND DIALECT (word-form channel; sibling of the v3.1 event tripwire) ──
+# Built 2026-08-12 after `refused-by-evidence` (lora-run3-phaseC) and `substrate+pilot`
+# (lora-run3-AB) both passed through every parser silently on the same night. The event
+# tripwire watches `event:` lines ONLY — these arrived on outcome/resolution words and on
+# `kind`, so that whole class of drift was unalerted BY CONSTRUCTION, not by regression.
+# The DECLARED vocabulary and how the parsers treat each word. A word listed here never
+# alerts; a word in neither map is new dialect and alerts until someone declares it. Per-id
+# disposition deliberately does NOT drive the alert — the first cut of this tripwire flagged
+# "unmapped word on a registered bet with no mapped terminal" and both hits were benign
+# (repeatnote-draw1 voids on a later line; hidden-replication's `progress` is a day-blocked
+# run mid-flight). Structure cannot separate "interim note" from "terminal we can't read";
+# the vocabulary can, and declaring it is a human act — same contract as the event tripwire.
+OUTCOME_DECLARED = {
+    "cleared": "verdict", "failed": "verdict",
+    "void": "void", "amended-before-running": "void",
+    "relabel": "adjudication", "correction": "bookkeeping", "closed": "unscorable",
+    # Non-scoring ledger annotations, declared 2026-08-12 from the live census. Declaring
+    # changes NO count (verdict_of already returns None for all of them) — it only keeps
+    # the tripwire quiet so a genuinely new word stands out instead of drowning.
+    "protocol": "annotation", "parked": "annotation", "held": "annotation",
+    "stop": "annotation", "amended-before-resolution": "annotation",
+    "progress": "in-progress",
+}
+_DECL_ORDER = sorted(OUTCOME_DECLARED, key=len, reverse=True)   # longest prefix wins
+
+def outcome_word(l):
+    w = l.get("outcome") or l.get("resolution")
+    return str(w).strip() if w else ""
+
+def outcome_class(w):
+    lw = w.lower()
+    for k in _DECL_ORDER:
+        if lw.startswith(k): return OUTCOME_DECLARED[k]
+    return "NEW"
+
+# Registration kinds seen in the live ledger 2026-08-12. Kind is TOKENISED, not compared
+# whole: `substrate+pilot` must still hit the substrate rule, or a measurement draw scores
+# as an ordinary forecast (it did — it was one of the two entries that took n 40→42).
+KIND_TOKENS = {"substrate", "pilot", "instrument", "lever", "desk-probe",
+               "protocol", "kernel-arm", "control", "probe"}
+
+def kind_tokens(l):
+    return {t for t in re.split(r"[+/,;\s]+", str(l.get("kind") or "").lower()) if t}
+
+def is_substrate(l):
+    return "substrate" in kind_tokens(l)
+
 def crit_of(pre):
     return pre.get("criterion") or pre.get("why") or ""
 
@@ -178,7 +225,7 @@ def pair(lines):
     for i in order:
         ls = by[i]
         priors = [l for l in ls if prior_of(l) is not None]
-        substrate = any(l.get("kind") == "substrate" for l in ls)
+        substrate = any(is_substrate(l) for l in ls)     # token-matched: compound kinds count
         terms = [l for l in ls if verdict_of(l) is not None
                  or (substrate and l.get("event") == "resolution"
                      and event_class(l) != "void")]   # measurement draw: any resolution is terminal
@@ -461,7 +508,7 @@ def main():
     # status no rule maps is the moment the dialect has drifted again — a scoreable
     # terminal the parsers cannot see would silently stick calibration n and starve the
     # #34/#41 wake greps. ALERT and extend event_class in BOTH parsers before trusting n.
-    subst_ids = {l.get("id") for l in lines if l.get("kind") == "substrate"}
+    subst_ids = {l.get("id") for l in lines if is_substrate(l)}
     ev_types, ev_classes, ev_unknown = {}, {}, []
     for l in lines:
         ev = l.get("event")
@@ -483,6 +530,66 @@ def main():
         alerts.append(f"ALERT event-dialect: '{i}' resolved event-style with status '{s}' — no head rule maps it (FAILED*/CLEARED*/VOID*/GRAY*/SUBSTRATE-*/*PREPUSH*; kind=substrate never scores): the id reads in-flight, calibration n sticks, and the #34/#41 wake patterns may miss it. Extend event_class in calibration.py + ledger_invariants.py and re-check the wake patterns before trusting n")
     out["event_dialect"] = {"n": ev_types.get("resolution", 0), "classes": ev_classes,
                             "types": ev_types, "unknown": [i for i, _ in ev_unknown]}
+
+    # ── OUTCOME-DIALECT TRIPWIRE (built 2026-08-12) ──
+    # Verdicts also arrive as plain `outcome`/`resolution` words, and the v3.1 event
+    # tripwire watches `event:` lines only — so word-form drift was unalerted by
+    # construction. Fires on UNDECLARED vocabulary (see OUTCOME_DECLARED), reporting for
+    # each new word whether the ledger has any handled disposition for that id, which is
+    # what separates "a bet we can no longer score" from "a note on the meta channel".
+    prior_ids = {l.get("id") for l in lines if prior_of(l) is not None}
+    handled   = {l.get("id") for l in lines
+                 if verdict_of(l) is not None or event_class(l) == "void"
+                 or outcome_class(outcome_word(l)) in ("void", "adjudication", "unscorable")}
+    w_cls, w_new = {}, {}
+    for l in lines:
+        w = outcome_word(l)
+        if not w: continue
+        head, cls = w.split()[0][:34], outcome_class(w)
+        w_cls.setdefault(cls, {}); w_cls[cls][head] = w_cls[cls].get(head, 0) + 1
+        if cls == "NEW": w_new.setdefault(head, []).append(l.get("id"))
+    if w_cls:
+        order = ["verdict", "void", "adjudication", "unscorable", "bookkeeping",
+                 "in-progress", "annotation", "NEW"]
+        parts = [f"{c}[{' '.join(f'{k}:{v}' for k, v in sorted(w_cls[c].items(), key=lambda kv: -kv[1]))}]"
+                 for c in order if c in w_cls]
+        print(f"\nOUTCOME DIALECT  {sum(sum(d.values()) for d in w_cls.values())} words · "
+              + " ".join(parts) + ("" if w_new else " · all declared"))
+    for k, ids in sorted(w_new.items()):
+        who = sorted(set(i for i in ids if i))
+        reg = [i for i in who if i in prior_ids]
+        adj = [i for i in who if i in handled]
+        tail = (f"sits on REGISTERED prereg(s) {', '.join(reg)} with no other handled disposition"
+                " — a bet whose terminal the parsers cannot read: it reads in-flight and calibration n sticks"
+                if [i for i in reg if i not in adj] else
+                f"appears only on id(s) {', '.join(who)} that never registered a prior"
+                " — a programme DECISION with no home in the audit layer (it scores nothing and is counted nowhere)")
+        alerts.append(f"ALERT outcome-dialect: '{k}' is undeclared vocabulary and {tail}. Declare it in OUTCOME_DECLARED (both parsers) with the class it should carry, or have the ledger restate the line with a declared word")
+    out["outcome_dialect"] = {"classes": {c: sum(d.values()) for c, d in w_cls.items()},
+                              "words": {c: d for c, d in w_cls.items()},
+                              "new": {k: sorted(set(v)) for k, v in w_new.items()}}
+
+    # ── KIND CENSUS ── kind is tokenised, so a compound value still hits its rules; an
+    # unrecognised token is the moment a new registration class appears, and if it means
+    # "measurement draw" without saying `substrate` it will score as an ordinary bet.
+    kinds, kind_unknown = {}, {}
+    for l in lines:
+        kv = str(l.get("kind") or "").strip()
+        if not kv: continue
+        kinds[kv] = kinds.get(kv, 0) + 1
+        if kind_tokens(l) - KIND_TOKENS:
+            kind_unknown.setdefault(kv, []).append(l.get("id"))
+    if kinds:
+        ks = " ".join(f"{k}:{v}" for k, v in sorted(kinds.items(), key=lambda kv: -kv[1]))
+        comp = [k for k in kinds if len(kind_tokens({"kind": k})) > 1]
+        print(f"KIND  {ks}" + (f" · compound (token-matched): {', '.join(comp)}" if comp else ""))
+    for kv, ids in sorted(kind_unknown.items()):
+        new = ", ".join(sorted(kind_tokens({"kind": kv}) - KIND_TOKENS))
+        tail = ("it already token-matches `substrate`, so it correctly does NOT score — confirm that is intended"
+                if is_substrate({"kind": kv}) else
+                "it will SCORE as an ordinary forecast; if it names a measurement draw the value must contain `substrate`")
+        alerts.append(f"ALERT kind-dialect: kind '{kv}' carries unknown token(s) [{new}] on {', '.join(sorted(set(i for i in ids if i)))} — {tail}. Extend KIND_TOKENS in both parsers")
+    out["kind_census"] = {"values": kinds, "unknown": {k: sorted(set(v)) for k, v in kind_unknown.items()}}
 
     # ── ORPHANED EXISTENTIALS (seven-dpt store, if present) ──
     store_p = os.environ.get("SEVEN_DPT_DB") or os.path.join(

@@ -41,7 +41,7 @@ Run:  python3 analysis/calibration.py [--json] [--split YYYY-MM-DD]
 Env:  ARC_PRIOR_LEDGER (default ~/projects/arc-agi-3/launch/prior-ledger.jsonl)
       SEVEN_DPT_DB, CALIBRATION_JSON, BINS (default 4)
 """
-import json, math, os, sys
+import json, math, os, re, sys
 
 LEDGER = os.path.expanduser(os.environ.get("ARC_PRIOR_LEDGER",
          "~/projects/arc-agi-3/launch/prior-ledger.jsonl"))
@@ -117,6 +117,12 @@ def is_void(l):
     return l.get("outcome") == "void" or (l.get("resolution") or "").lower().startswith("void") \
         or event_class(l) == "void"
 
+def is_substrate(l):
+    """Mirrors ledger_invariants.py. `kind` is TOKENISED, not compared whole: a compound
+    value (`substrate+pilot`, 2026-08-12) must still hit the substrate rule, or a
+    measurement draw scores as an ordinary forecast — which it did, silently."""
+    return "substrate" in {t for t in re.split(r"[+/,;\s]+", str(l.get("kind") or "").lower()) if t}
+
 def wilson(k, n, z=1.96):
     if n == 0: return (0.0, 1.0)
     p = k / n; z2 = z * z
@@ -145,7 +151,7 @@ for pid in order:
                  or "event" in l]
     terminals = [l for l in outs if verdict_of(l) is not None]
     verdicts  = [l for l in outs if verdict_of(l) is not None or l.get("outcome") == "relabel"]
-    substrate = any(l.get("kind") == "substrate" for l in lines)
+    substrate = any(is_substrate(l) for l in lines)
     corrections += [pid for l in outs if l.get("outcome") == "correction"]
     if not priors:
         continue  # outcome-only id (shouldn't happen; visible via line-count check below)
