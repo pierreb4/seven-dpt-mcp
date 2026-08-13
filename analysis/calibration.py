@@ -113,8 +113,12 @@ def verdict_of(l):
         return _HEADS.get(head)
     return None
 
+VOID_WORDS = ("void", "instrument-inadequate")   # instrument-inadequate: arrived 2026-08-12
+                                                 # paired with resolution "void" — could not
+                                                 # measure, so no information either way.
+
 def is_void(l):
-    return l.get("outcome") == "void" or (l.get("resolution") or "").lower().startswith("void") \
+    return any(str(l.get(f) or "").lower().startswith(VOID_WORDS) for f in ("outcome", "resolution")) \
         or event_class(l) == "void"
 
 def is_declined(l):
@@ -123,8 +127,21 @@ def is_declined(l):
     happened, so there is no ground truth to grade the stated prior against. Under the
     register-then-refuse protocol these ids DO carry a prior, so without this branch they
     would read in-flight forever."""
-    w = str(l.get("outcome") or l.get("resolution") or "").lower()
-    return w.startswith(("refused", "declined"))
+    return any(str(l.get(f) or "").lower().startswith(("refused", "declined", "premise-refuted"))
+               for f in ("outcome", "resolution"))
+
+def last_disposition(ls):
+    """Last readable disposition on an id — the ledger is append-only, so a later line
+    supersedes an earlier one. Needed because `shapeid-rot-rung` (2026-08-12) refuses and
+    then AMENDS that refusal to void 80 minutes later: an any()-style declined check would
+    freeze it at the refusal and disagree with ledger_invariants, which takes last-wins."""
+    d = None
+    for l in ls:
+        if is_declined(l):                   d = "declined"
+        elif is_void(l):                     d = "void"
+        elif verdict_of(l) is not None:      d = "verdict"
+        elif l.get("outcome") == "relabel":  d = "relabel"
+    return d
 
 def is_substrate(l):
     """Mirrors ledger_invariants.py. `kind` is TOKENISED, not compared whole: a compound
@@ -162,7 +179,7 @@ for pid in order:
     verdicts  = [l for l in outs if verdict_of(l) is not None or l.get("outcome") == "relabel"]
     substrate = any(is_substrate(l) for l in lines)
     corrections += [pid for l in outs if l.get("outcome") == "correction"]
-    if any(is_declined(l) for l in outs):
+    if last_disposition(lines) == "declined":
         declined.append(pid); continue   # terminal WITH OR WITHOUT a prior. Checked before the
                                          # no-prior guard on purpose: the register-then-refuse
                                          # protocol asks for a prior, but a refusal that skipped

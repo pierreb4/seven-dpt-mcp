@@ -178,12 +178,16 @@ OUTCOME_DECLARED = {
     # REGISTER the prereg with the prior you intended, THEN refuse — the prior survives,
     # so "we thought p=0.4 and declined; were we right?" stays answerable later.
     "refused-by-evidence": "declined", "refused": "declined", "declined": "declined",
+    # 2026-08-12 overnight, declared 08-13 from arc's own pairing (each appeared WITH the
+    # declared verdict that fixes its meaning, so this is absorption, not interpretation):
+    # premise-refuted arrived on `resolution":"refused"` — the premise died, so the probe was
+    # never run; instrument-inadequate on `resolution":"void"` — the instrument could not
+    # measure, so no information. Declared so each stays readable if it ever appears ALONE.
+    # NOT declared: `amends …` (shapeid-rot-rung) — arc must say whether amending a refusal
+    # VOIDS the bet or REOPENS it; it reads void today only because that line says so.
+    "premise-refuted": "declined", "instrument-inadequate": "void",
 }
 _DECL_ORDER = sorted(OUTCOME_DECLARED, key=len, reverse=True)   # longest prefix wins
-
-def outcome_word(l):
-    w = l.get("outcome") or l.get("resolution")
-    return str(w).strip() if w else ""
 
 def outcome_class(w):
     lw = w.lower()
@@ -191,14 +195,44 @@ def outcome_class(w):
         if lw.startswith(k): return OUTCOME_DECLARED[k]
     return "NEW"
 
+# VERDICT + REASON (arc convention, first seen 2026-08-12). A resolution line may now carry
+# BOTH fields: `resolution` the declared verdict token, `outcome` the specific reason —
+# {"resolution":"refused","outcome":"premise-refuted"}. Historically only ONE field ever
+# appeared and it held the verdict, so precedence never mattered; all 5 dual-field lines put
+# the declared word in `resolution`. The old rule (`outcome or resolution`, first wins) read
+# the REASON and discarded the VERDICT, so a refused probe read in-flight and drove a false
+# "live bet" alert. Rule now: the disposition is the first field yielding a DECLARED class.
+# A field left undeclared alongside a declared one is free-text reason, NOT new vocabulary —
+# censusing it would flag prose forever ("amends the 2026-08-12T22:20:00Z 'refused'
+# resolution" is a sentence, not a word). A line where NEITHER field is declared is the real
+# tripwire condition: genuinely unreadable, and that is what now alerts.
+def disposition(l):
+    """-> (word, class). class 'NEW' means no field on the line was readable."""
+    cand = [str(l.get(f)).strip() for f in ("outcome", "resolution") if l.get(f)]
+    for w in cand:
+        c = outcome_class(w)
+        if c != "NEW": return w, c
+    return (cand[0] if cand else ""), "NEW"
+
+def outcome_word(l):
+    return disposition(l)[0]
+
+def has_reason(l):
+    """True when the line carries a declared verdict AND a second, free-text reason field."""
+    return len([f for f in ("outcome", "resolution") if l.get(f)]) > 1 \
+        and disposition(l)[1] != "NEW"
+
 def is_declined(l):
-    return outcome_class(outcome_word(l)) == "declined"
+    return disposition(l)[1] == "declined"
 
 # Registration kinds seen in the live ledger 2026-08-12. Kind is TOKENISED, not compared
 # whole: `substrate+pilot` must still hit the substrate rule, or a measurement draw scores
 # as an ordinary forecast (it did — it was one of the two entries that took n 40→42).
 KIND_TOKENS = {"substrate", "pilot", "instrument", "lever", "desk-probe",
-               "protocol", "kernel-arm", "control", "probe"}
+               "protocol", "kernel-arm", "control", "probe",
+               "kernel-ab"}   # 2026-08-13: A/B kernel run (tr87-pair-x-rot-joint). Carries a
+                              # real prior on a real lever, so scoring it as an ordinary
+                              # forecast is correct — it is NOT a measurement draw.
 
 def kind_tokens(l):
     return {t for t in re.split(r"[+/,;\s]+", str(l.get("kind") or "").lower()) if t}
@@ -435,16 +469,62 @@ def main():
                        "unitless": cfg_unitless}
 
     # ── CHANNEL STAMP ──
-    allpre = inflight + resolved
-    stamped = [r for r in allpre if r["pre"].get("channel")]
-    missing = [r["id"] for r in allpre if not r["pre"].get("channel")]
-    print(f"\nCHANNEL STAMP  {len(stamped)}/{len(allpre)} preregs name their channel"
-          + (f" · missing (recent): {', '.join(missing[-6:])}" if missing else ""))
-    if missing and os.environ.get("CHANNEL_STRICT"):
-        alerts.append(f"ALERT channel: {len(missing)} preregs carry no channel stamp under CHANNEL_STRICT")
-    elif missing:
+    # Denominator is EVERY prereg, not the paired ones. pair() drops voids and declines, so
+    # under the old denominator a prereg that was stamped and THEN voided or was refused
+    # vanished from numerator and denominator alike: on 2026-08-13 arc had stamped 5 of 5 new
+    # preregs and this face reported 2/63 — it told them the adoption had not happened. A
+    # compliance face that under-reports compliance is worse than no face; it teaches the
+    # reader their effort went unseen. History can never be stamped, so overall coverage is
+    # reported for context but only a LAPSE SINCE ADOPTION warns.
+    preregs, seen_pre = [], set()
+    for l in lines:
+        pid = l.get("id")
+        if pid is None or pid in seen_pre or prior_of(l) is None: continue
+        seen_pre.add(pid); preregs.append(l)
+
+    # FINAL disposition per id — computed ONCE here and used by every face below. The ledger is
+    # append-only, so a later line supersedes an earlier one: shapeid-rot-rung (2026-08-12)
+    # refuses, then AMENDS that refusal to void 80 minutes later. A per-line `any(is_declined)`
+    # freezes it at the refusal and reports a decline that was withdrawn — which is what the
+    # DECLINED face did on 08-13 while the family face, using this map, got it right. One map,
+    # every face; a disposition computed twice is a disposition that will disagree with itself.
+    # Reads BOTH dialects: word-form (outcome/resolution) and v3.1 event-form. A word-only map
+    # would call every event-resolved prereg unresolved — 10 of them here — and the family
+    # face would then read live families as stalled ones.
+    _EV_CLS = {"cleared": "verdict", "failed": "verdict", "void": "void",
+               "nonscored": "nonscored"}
+    final_cls = {}
+    for l in lines:
+        pid = l.get("id")
+        if pid is None: continue
+        c = disposition(l)[1]
+        if c == "NEW":
+            c = _EV_CLS.get(event_class(l) or "", "NEW")
+        if c != "NEW": final_cls[pid] = c
+
+    def stamp_face(field):
+        """-> (n_stamped, missing_ids, since_ts, recent, recent_missing_ids)"""
+        st   = [l for l in preregs if l.get(field)]
+        miss = [l.get("id") for l in preregs if not l.get(field)]
+        since = min((str(l.get("ts") or "") for l in st), default="")
+        recent = [l for l in preregs if since and str(l.get("ts") or "") >= since] if st else []
+        rmiss  = [l.get("id") for l in recent if not l.get(field)]
+        return len(st), miss, since, recent, rmiss
+
+    n_ch, ch_miss, ch_since, ch_recent, ch_rmiss = stamp_face("channel")
+    print(f"\nCHANNEL STAMP  {n_ch}/{len(preregs)} preregs name their channel"
+          + (f" · since adoption {ch_since[:10]}: {len(ch_recent) - len(ch_rmiss)}/{len(ch_recent)}"
+             if n_ch else "")
+          + (f" · missing (recent): {', '.join(i for i in ch_miss[-6:] if i)}" if ch_miss else ""))
+    if ch_miss and os.environ.get("CHANNEL_STRICT"):
+        alerts.append(f"ALERT channel: {len(ch_miss)} preregs carry no channel stamp under CHANNEL_STRICT")
+    elif n_ch == 0:
         print("  WARN: unstamped levers can optimize a dead channel undetected — add `channel` (+`liveness`) at registration")
-    out["channel"] = {"stamped": len(stamped), "total": len(allpre)}
+    elif ch_rmiss:
+        print(f"  WARN: adoption lapsed — {len(ch_rmiss)} prereg(s) since {ch_since[:10]} carry no"
+              f" `channel`: {', '.join(i for i in ch_rmiss if i)}")
+    out["channel"] = {"stamped": n_ch, "total": len(preregs), "since": ch_since,
+                      "recent": len(ch_recent), "recent_missing": ch_rmiss}
 
     # ── FAMILY MIX (spark #45): audit the CHOICE STREAM the ledger censors everything else by ──
     # Walk raw lines in file order (append-only ledger = chronological): preregs arrive,
@@ -452,6 +532,29 @@ def main():
     # crossing >=FAMILY_K preregs / >=2 levers / 0 positives is a concentration episode; an
     # in-flight prereg still sitting in one ALERTs (close it or state the continue reason).
     fam_k = int(os.environ.get("FAMILY_K", 3))
+
+    # "0 positives" hides three different worlds, and they carry OPPOSITE prescriptions.
+    # Measured 2026-08-13: `completion` had 4 bets, 3 of them terminal-but-NON-SCORING and 1
+    # live — zero scoreable results ever — while the face called it evidence-negative and
+    # advised retiring it. Retiring is right when levers were tried and lost; it is wrong when
+    # the instrument cannot produce a score (fix the instrument) and wrong again when nothing
+    # has finished (close the bets). The episode still FIRES in all three cases — no signal is
+    # dropped — but it now says which world it is.
+    def fam_shape(st):
+        if st["verdicts"]:  return "evidence-negative"   # tried, scored, never won
+        if st["completed"]: return "no-scoreable-result" # ran to terminal, nothing scoreable
+        return "unresolved"                              # nothing has finished at all
+    # A DECLINE IS NOT EVIDENCE (2026-08-13). "re-entry-without-a-positive" means we went back
+    # into a family and it gave us nothing. A prereg we registered and then REFUSED never ran,
+    # so it produced no evidence for or against — counting it made "0 positives" trivially
+    # true and inverted the prescription: an unexplored family got reported as an exhausted
+    # one. Live on 08-13: `perception` fired the episode on 3 preregs of which 2 were refused
+    # before running, raising two ALERTs on a family we had barely tried. This is the cost of
+    # register-then-refuse landing in a face built before the class existed — the shares below
+    # still count every prereg (that face audits the CHOICE stream, and a refusal IS a choice),
+    # but the EPISODE now counts only attempts. Disposition is precomputed because the
+    # chronological walk cannot know at registration time how a prereg will end (final_cls
+    # is built once, above).
     seen_prereg, fam_stat, episodes, stream = set(), {}, [], []
     stamped_fam = 0
     for l in lines:
@@ -462,16 +565,26 @@ def main():
             fam = family_of(pid, l)
             if l.get("family"): stamped_fam += 1
             lev = lever_of(pid)
-            st = fam_stat.setdefault(fam, {"preregs": 0, "levers": set(), "pos": 0, "flagged": False})
+            st = fam_stat.setdefault(fam, {"preregs": 0, "levers": set(), "pos": 0,
+                                           "flagged": False, "attempts": 0, "alevers": set(),
+                                           "declined": 0, "verdicts": 0, "completed": 0})
             st["preregs"] += 1; st["levers"].add(lev)
+            fc = final_cls.get(pid)
+            if fc == "declined":
+                st["declined"] += 1
+            else:
+                st["attempts"] += 1; st["alevers"].add(lev)
+                if fc is not None:        st["completed"] += 1
+                if fc == "verdict":       st["verdicts"] += 1
             new_fam = st["preregs"] == 1
             stream.append({"id": pid, "ts": l.get("ts") or l.get("date") or "", "family": fam,
                            "new_family": new_fam})
             if (fam != "?" and fam not in SUPPORT_FAMILIES and not st["flagged"]
-                    and st["preregs"] >= fam_k and len(st["levers"]) >= 2 and st["pos"] == 0):
+                    and st["attempts"] >= fam_k and len(st["alevers"]) >= 2 and st["pos"] == 0):
                 st["flagged"] = True
-                episodes.append({"family": fam, "at": pid, "preregs": st["preregs"],
-                                 "levers": len(st["levers"])})
+                episodes.append({"family": fam, "at": pid, "preregs": st["attempts"],
+                                 "levers": len(st["alevers"]), "declined": st["declined"],
+                                 "shape": fam_shape(st)})
         elif pid in seen_prereg:
             fam = next((s["family"] for s in stream if s["id"] == pid), None)
             if fam and verdict_of(l) == "cleared":
@@ -488,25 +601,47 @@ def main():
             return (sum(1 for s in rows if s["new_family"]) / len(rows)) if rows else 0.0
         pre_era  = [s for s in stream if (s["ts"][:10] or "9999") < "2026-08-07"]
         post_era = [s for s in stream if (s["ts"][:10]) >= "2026-08-07"]
+        n_fm, fm_miss, fm_since, fm_recent, fm_rmiss = stamp_face("family")
         print(f"\nFAMILY MIX  {n_stream} preregs · coverage {cov:.0%} ({len(fams)} families"
               f" · top: {top_fam} {top_n/max(1,len(classified)):.0%})"
-              f" · family stamps {stamped_fam}/{n_stream}")
+              f" · family stamps {stamped_fam}/{n_stream}"
+              + (f" · since adoption {fm_since[:10]}: {len(fm_recent) - len(fm_rmiss)}/{len(fm_recent)}"
+                 if n_fm else ""))
         print(f"  exploration (new-family share): overall {share(stream):.0%}"
               f" · pre-era {share(pre_era):.0%} · post-era {share(post_era):.0%}"
               f" · last-10 {share(stream[-10:]):.0%}")
         for e in episodes:
             later = fam_stat[e["family"]]["pos"] > 0
             e["later_cleared"] = later
-            print(f"  re-entry-without-a-positive: {e['family']} crossed {e['preregs']} preregs"
-                  f"/{e['levers']} levers/0 positives at '{e['at']}'"
+            print(f"  re-entry-without-a-positive ({e['shape']}): {e['family']} crossed"
+                  f" {e['preregs']} attempts/{e['levers']} levers/0 positives at '{e['at']}'"
+                  + (f" ({e['declined']} refused before running, not counted)" if e.get("declined") else "")
                   + (" — family later cleared" if later else ""))
-        if stamped_fam == 0:
+        if n_fm == 0:
             print("  WARN: no `family` stamps — retro classification only; add `family` at registration (protocol ask)")
+        elif fm_rmiss:
+            print(f"  WARN: adoption lapsed — {len(fm_rmiss)} prereg(s) since {fm_since[:10]} carry no"
+                  f" `family`: {', '.join(i for i in fm_rmiss if i)}")
         for s in stream:
             fam = s["family"]
             if fam == "?" or not fam_stat[fam]["flagged"]: continue
             if any(r["id"] == s["id"] for r in inflight):
-                alerts.append(f"ALERT family-mix: in-flight '{s['id']}' sits in family '{fam}' with {fam_stat[fam]['preregs']} preregs/{len(fam_stat[fam]['levers'])} levers/0 positives — a live bet in an evidence-negative family: close it or state the continue reason on the ledger")
+                st, shape = fam_stat[fam], fam_shape(fam_stat[fam])
+                head = (f"ALERT family-mix: in-flight '{s['id']}' sits in family '{fam}' with"
+                        f" {st['attempts']} attempts/{len(st['alevers'])} levers/0 positives")
+                if shape == "evidence-negative":
+                    tail = (" — a live bet in an evidence-negative family: close it or state the"
+                            " continue reason on the ledger")
+                elif shape == "no-scoreable-result":
+                    live = st["attempts"] - st["completed"]
+                    tail = (f" — all {st['completed']} completed run(s) came back NON-SCOREABLE"
+                            + (f" and {live} {'is' if live == 1 else 'are'} still in flight" if live else "")
+                            + ", so nothing here has ever tested a lever: the instrument is what has"
+                            " failed, not the idea. Fix the measurement or state why this bet will score")
+                else:
+                    tail = (f" — none of the {st['attempts']} bets in this family has EVER resolved:"
+                            " this is a stall, not an exhausted idea. Close them or state the continue reason")
+                alerts.append(head + tail)
         out["family_mix"] = {"n": n_stream, "coverage": round(cov, 2), "families": fams,
                              "top": top_fam, "stamps": stamped_fam,
                              "exploration_share": {"overall": round(share(stream), 3),
@@ -555,11 +690,12 @@ def main():
     handled   = {l.get("id") for l in lines
                  if verdict_of(l) is not None or event_class(l) == "void"
                  or outcome_class(outcome_word(l)) in ("void", "adjudication", "unscorable")}
-    w_cls, w_new = {}, {}
+    w_cls, w_new, n_reason = {}, {}, 0
     for l in lines:
-        w = outcome_word(l)
+        w, cls = disposition(l)
         if not w: continue
-        head, cls = w.split()[0][:34], outcome_class(w)
+        if has_reason(l): n_reason += 1     # verdict+reason line: the reason is prose, not vocabulary
+        head = w.split()[0][:34]
         w_cls.setdefault(cls, {}); w_cls[cls][head] = w_cls[cls].get(head, 0) + 1
         if cls == "NEW": w_new.setdefault(head, []).append(l.get("id"))
     if w_cls:
@@ -568,16 +704,27 @@ def main():
         parts = [f"{c}[{' '.join(f'{k}:{v}' for k, v in sorted(w_cls[c].items(), key=lambda kv: -kv[1]))}]"
                  for c in order if c in w_cls]
         print(f"\nOUTCOME DIALECT  {sum(sum(d.values()) for d in w_cls.values())} words · "
-              + " ".join(parts) + ("" if w_new else " · all declared"))
+              + " ".join(parts)
+              + (f" · {n_reason} verdict+reason" if n_reason else "")
+              + ("" if w_new else " · all declared"))
+    # The tail VERIFIES the id's disposition instead of inferring it. The first cut of this
+    # tripwire inferred, and shipped two false positives; the second inferred one level in —
+    # it fixed the trigger but left "it reads in-flight" asserted in the tail, which on
+    # 2026-08-13 was false for 2 of 3 alerts. Membership of `inflight` is knowable here, so
+    # check it. An id that another line already disposed of is a census gap, not a stuck bet.
     for k, ids in sorted(w_new.items()):
-        who = sorted(set(i for i in ids if i))
-        reg = [i for i in who if i in prior_ids]
-        adj = [i for i in who if i in handled]
-        tail = (f"sits on REGISTERED prereg(s) {', '.join(reg)} with no other handled disposition"
-                " — a bet whose terminal the parsers cannot read: it reads in-flight and calibration n sticks"
-                if [i for i in reg if i not in adj] else
-                f"appears only on id(s) {', '.join(who)} that never registered a prior"
-                " — a programme DECISION with no home in the audit layer (it scores nothing and is counted nowhere)")
+        who   = sorted(set(i for i in ids if i))
+        stuck = [i for i in who if any(r["id"] == i for r in inflight)]
+        reg   = [i for i in who if i in prior_ids]
+        if stuck:
+            tail = (f"sits on prereg(s) {', '.join(stuck)} that READ IN-FLIGHT because no field on"
+                    " the line is readable — the bet is stuck and calibration n sticks with it")
+        elif reg:
+            tail = (f"sits on registered prereg(s) {', '.join(reg)} that a later line already"
+                    " disposed of — nothing is stuck; the census just cannot name this outcome")
+        else:
+            tail = (f"appears only on id(s) {', '.join(who)} that never registered a prior"
+                    " — a programme DECISION with no home in the audit layer (it scores nothing and is counted nowhere)")
         alerts.append(f"ALERT outcome-dialect: '{k}' is undeclared vocabulary and {tail}. Declare it in OUTCOME_DECLARED (both parsers) with the class it should carry, or have the ledger restate the line with a declared word")
     out["outcome_dialect"] = {"classes": {c: sum(d.values()) for c, d in w_cls.items()},
                               "words": {c: d for c, d in w_cls.items()},
@@ -589,10 +736,13 @@ def main():
     # question the ledger could not previously ask: are we systematically walking away
     # from bets we rated well, or correctly killing the ones we rated badly? A decline
     # with no prior is uncountable in that comparison, so it raises the protocol ask.
+    # final_cls, not per-line is_declined: a refusal that a later line AMENDS away is not a
+    # decline, and listing it here would both overstate the count and drag the mean prior.
     dec_ids = []
     for l in lines:
-        if is_declined(l) and l.get("id") not in dec_ids:
-            dec_ids.append(l.get("id") or "?")
+        pid = l.get("id")
+        if final_cls.get(pid) == "declined" and pid not in dec_ids:
+            dec_ids.append(pid or "?")
     if dec_ids:
         dec_p = {}
         for i in dec_ids:
