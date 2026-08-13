@@ -140,9 +140,15 @@ def verdict_of(l):
     if ec in ("cleared", "failed"): return ec
     if ec == "nonscored": return "gray"   # terminal; PARK-STREAK classifies from the note
     if ec is not None: return None        # void / ignore / unknown
-    w = l.get("outcome") or l.get("resolution") or ""
-    if w.startswith("cleared"): return "cleared"
-    if w.startswith("failed"):  return "failed"
+    # BOTH fields, in the same precedence disposition() uses. Reading only the first present
+    # field is the bug that has now bitten three separate functions: tr87-lens-ceiling arrived
+    # as {"resolution":"cleared","outcome":"positive-below-threshold"} and this returned None,
+    # so pair() called a CLEARED bet in-flight while the dialect census called it cleared —
+    # one file, two answers.
+    for w in (l.get("outcome"), l.get("resolution")):
+        if not w: continue
+        v = _verdict_word(w)
+        if v: return v
     if l.get("status") == "closed":
         head = ((l.get("result") or "").split() or [""])[0].strip(".,;:—-*")
         return _HEADS.get(head)
@@ -186,7 +192,28 @@ OUTCOME_DECLARED = {
     # NOT declared: `amends …` (shapeid-rot-rung) — arc must say whether amending a refusal
     # VOIDS the bet or REOPENS it; it reads void today only because that line says so.
     "premise-refuted": "declined", "instrument-inadequate": "void",
+    # 2026-08-13, arc: RAN-AND-LOST vs WALKED-AWAY is the distinction they need preserved, and
+    # they minted a token rather than lose it. tr87-pair-x-rot-joint is 3 arms x 15 tr87 passes
+    # on real GPU — a scoreable NEGATIVE, not a refusal. It arrived as
+    # {"resolution":"refused","outcome":"refuted-by-run"}, and `refused` alone would have filed
+    # a completed run under `declined`: off the curve, and uncounted as evidence in its family.
+    # Declared here so the reason word WINS over the verdict field (outcome is checked first),
+    # and taught to verdict_of below so it actually scores as a failure.
+    "refuted-by-run": "verdict",
+    # NOT declared, deliberately: `amends …`. Arc's rule (2026-08-13) is SUPERSEDE — the latest
+    # line carrying a declared verdict is the disposition, earlier ones are superseded, and an
+    # amendment closes the old bet AT THE AMENDING VERDICT rather than reopening it. So `amends`
+    # is a reason word whose class is whatever it amends TO; fixing it to one class would be
+    # wrong the first time something is amended to `cleared`. Alone on a line it is meaningless
+    # and SHOULD alert. The rule itself lives in final_cls (last readable disposition wins).
 }
+
+# Words that carry a scoreable verdict, checked against BOTH fields (see verdict_of).
+def _verdict_word(w):
+    lw = str(w).lower()
+    if lw.startswith("cleared"): return "cleared"
+    if lw.startswith(("failed", "refuted-by-run")): return "failed"
+    return None
 _DECL_ORDER = sorted(OUTCOME_DECLARED, key=len, reverse=True)   # longest prefix wins
 
 def outcome_class(w):
@@ -505,6 +532,10 @@ def main():
         if c == "NEW":
             c = _EV_CLS.get(event_class(l) or "", "NEW")
         if c != "NEW": final_cls[pid] = c
+    out["disposition"] = final_cls      # published so self_check can hold this view against
+                                        # pair()'s: on 08-13 they disagreed about tr87-lens-
+                                        # ceiling (cleared here, in-flight there) and nothing
+                                        # noticed, because the two views were never compared.
 
     def stamp_face(field):
         """-> (n_stamped, missing_ids, since_ts, recent, recent_missing_ids)"""
@@ -629,10 +660,17 @@ def main():
         for s in stream:
             fam = s["family"]
             if fam == "?" or not fam_stat[fam]["flagged"]: continue
+            # `flagged` is sticky by design (the episode is a historical fact), but the ALERT is
+            # a claim about NOW. A family that has since produced a positive is no longer a
+            # family with no evidence of working, and the whole rationale — "close it or justify
+            # continuing" — evaporates. On 2026-08-13 perception cleared tr87-lens-ceiling and
+            # this still told arc their next arm sat in an evidence-negative family. The count
+            # was a LITERAL "0 positives" in the string, which is why it could go stale at all.
+            if fam_stat[fam]["pos"] > 0: continue
             if any(r["id"] == s["id"] for r in inflight):
                 st, shape = fam_stat[fam], fam_shape(fam_stat[fam])
                 head = (f"ALERT family-mix: in-flight '{s['id']}' sits in family '{fam}' with"
-                        f" {st['attempts']} attempts/{len(st['alevers'])} levers/0 positives")
+                        f" {st['attempts']} attempts/{len(st['alevers'])} levers/{st['pos']} positives")
                 if shape == "evidence-negative":
                     tail = (" — a live bet in an evidence-negative family: close it or state the"
                             " continue reason on the ledger")

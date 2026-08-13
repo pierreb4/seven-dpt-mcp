@@ -105,9 +105,14 @@ def verdict_of(l):
     ec = event_class(l)
     if ec is not None:
         return {"cleared": 1, "failed": 0}.get(ec)
-    w = l.get("outcome") or l.get("resolution") or ""
-    if w.startswith("cleared"): return 1
-    if w.startswith("failed"):  return 0
+    # BOTH fields, same precedence as ledger_invariants (2026-08-13). Reading only the first
+    # present one made this return None for {"resolution":"cleared","outcome":"positive-below-
+    # threshold"} — a cleared bet silently off the curve. `refuted-by-run` is arc's token for
+    # ran-and-lost, minted so a completed negative is not filed as a walk-away.
+    for w in (l.get("outcome"), l.get("resolution")):
+        lw = str(w or "").lower()
+        if lw.startswith("cleared"): return 1
+        if lw.startswith(("failed", "refuted-by-run")): return 0
     if l.get("status") == "closed":
         head = ((l.get("result") or "").split() or [""])[0].strip(".,;:—-*")
         return _HEADS.get(head)
@@ -137,9 +142,12 @@ def last_disposition(ls):
     freeze it at the refusal and disagree with ledger_invariants, which takes last-wins."""
     d = None
     for l in ls:
-        if is_declined(l):                   d = "declined"
+        # VERDICT IS CHECKED FIRST. A line can carry a verdict word and a refusal word at once
+        # — {"resolution":"refused","outcome":"refuted-by-run"} is arc's ran-and-lost — and a
+        # completed run filed as a walk-away would drop off the curve entirely.
+        if verdict_of(l) is not None:        d = "verdict"
+        elif is_declined(l):                 d = "declined"
         elif is_void(l):                     d = "void"
-        elif verdict_of(l) is not None:      d = "verdict"
         elif l.get("outcome") == "relabel":  d = "relabel"
     return d
 

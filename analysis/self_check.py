@@ -89,6 +89,23 @@ for bname, ids in buckets.items():
 check("calibration: every id in at most one bucket", not dupes,
       "; ".join(f"{i} in {sorted(b)}" for i, b in sorted(dupes.items())))
 
+# 3b — THE TWO VIEWS INSIDE INVARIANTS. disposition() classifies each id from its own lines;
+#      pair() decides separately whether the id is resolved or live. They are computed by
+#      different code from the same ledger, so an id the first calls TERMINAL and the second
+#      calls in-flight is a contradiction. This check was added 2026-08-13 after exactly that
+#      slipped through a green self-check: tr87-lens-ceiling arrived as
+#      {"resolution":"cleared","outcome":"positive-below-threshold"}, the dialect census read
+#      it cleared, and pair() — whose verdict_of still read one field — raised an
+#      evidence-negative alert against it as a live bet. Class names, not words: which WORDS
+#      are terminal is the dialect layer's business, and duplicating that judgement here would
+#      re-import the thing being checked.
+TERMINAL_CLASSES = {"verdict", "void", "declined", "adjudication", "unscorable", "nonscored"}
+disp = inv.get("disposition") or {}
+if disp:
+    contra = sorted(i for i, c in disp.items() if c in TERMINAL_CLASSES and i in inv_inflight)
+    check("invariants: no id is both terminally disposed and in-flight", not contra,
+          "; ".join(f"{i} disposed '{disp[i]}' but pair() says in-flight" for i in contra))
+
 # 4 — ALERT HONESTY. An alert that names a state must name the state the faces published.
 #     This is the 08-13 tail defect: the claim was typed, not looked up. Any alert saying
 #     in-flight '<id>' is asserting membership of a set this script can read.
