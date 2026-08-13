@@ -380,6 +380,14 @@ if "--json" in sys.argv:
            "skill": round(skill, 4), "logodds_shift": round(delta, 4),
            "platt": {"a": round(pa, 4), "b": round(pb, 4)},
            "scope": {"universal": n_u, "existential_bounded": n_e, "unstamped": n_un},
+           # Buckets are persisted so self_check.py can hold this layer against
+           # ledger_invariants: the two disagreed twice in two days (declined 0 vs DECLINED 1,
+           # then a withdrawn refusal counted here and not there) and both times a human
+           # reading two screens caught it. Machine-checkable beats attentive.
+           "buckets": {"resolved": [r["id"] for r in resolved], "in_flight": inflight,
+                       "declined": declined, "void": voids, "relabeled": relabeled,
+                       "event_nonscored": event_nonscored, "amended": amended,
+                       "closed_unscorable": closed_unscorable},
            "last_resolved_ts": resolved[-1]["ts"]}
     if era_out: out["split"] = era_out
     os.makedirs(os.path.dirname(OUTJSON), exist_ok=True)

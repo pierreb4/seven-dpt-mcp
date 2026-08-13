@@ -33,4 +33,18 @@ echo "== composite: $(wc -l < "$COMPOSITE") lines ($(basename "$A"): $(wc -l < "
 echo "== calibration"
 ARC_PRIOR_LEDGER="$COMPOSITE" python3 "$HERE/calibration.py" --json "$@" >/dev/null
 echo "== invariants (STORE_STRICT=${STORE_STRICT:-1})"
+# `set -e` must not abort here: rc=1 is the NORMAL alert path, and the self-check below is
+# exactly what we want to run when the faces are noisy. PIPESTATUS[0] because `| tail` would
+# otherwise report tail's status (a trap this project has fallen into twice).
+set +e
 STORE_STRICT="${STORE_STRICT:-1}" ARC_PRIOR_LEDGER="$COMPOSITE" python3 "$HERE/ledger_invariants.py" --json | tail -40
+INV_RC=${PIPESTATUS[0]}
+echo "== self-check"
+python3 "$HERE/self_check.py"
+SC_RC=$?
+set -e
+
+# A contradiction BETWEEN faces outranks any alert FROM a face: if the layers disagree about
+# what happened, no number in this sweep has been established yet. rc=2 says so distinctly.
+if [ "$SC_RC" -ne 0 ]; then exit "$SC_RC"; fi
+exit "$INV_RC"

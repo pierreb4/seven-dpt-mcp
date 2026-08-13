@@ -381,7 +381,11 @@ def main():
         lines.append(l)
     resolved, inflight = pair(lines)
     noise = load_noise()
-    alerts, out = [], {"asof": asof, "n_resolved": len(resolved), "n_inflight": len(inflight)}
+    # ids (not just counts) are published so self_check.py can hold this layer against
+    # calibration.py and against this layer's OWN alert text — see that script's header.
+    alerts, out = [], {"asof": asof, "n_resolved": len(resolved), "n_inflight": len(inflight),
+                       "inflight_ids": [r["id"] for r in inflight],
+                       "resolved_ids": [r["id"] for r in resolved]}
     print(f"ledger: {LEDGER}" + (f"  (as of {asof})" if asof else ""))
     print(f"resolved {len(resolved)} · in-flight {len(inflight)}\n")
     if not resolved and not inflight:
