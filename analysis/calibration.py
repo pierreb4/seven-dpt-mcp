@@ -126,6 +126,36 @@ def is_void(l):
     return any(str(l.get(f) or "").lower().startswith(VOID_WORDS) for f in ("outcome", "resolution")) \
         or event_class(l) == "void"
 
+NONSCORED_WORDS = ("gray", "inconclusive", "ran-and-grayed", "ran-and-inconclusive")
+
+def is_nonscored(l):
+    """THE MIDDLE WORLD in word form (2026-08-14). Mirrors
+    ledger_invariants.OUTCOME_DECLARED[...]='nonscored'. RAN, instrument worked, result does
+    not adjudicate — so terminal and counted, but there is no y to score a prior against.
+    Word-form twin of the event-form GRAY* head, which this file already routes to
+    event_nonscored; the same concept arriving in a different dialect must land in the same
+    bucket or the curve depends on which way arc happened to write it.
+
+    NOTE the deliberate asymmetry with ledger_invariants: THERE verdict_of returns "gray" so
+    pair() counts a grayed run as a completed attempt (a family that grayed three times has
+    attempted three times); HERE verdict_of must keep returning None so it never reaches
+    `resolved`. Same word, two correct answers, because the two files measure different
+    things."""
+    return any(str(l.get(f) or "").lower().startswith(NONSCORED_WORDS)
+               for f in ("outcome", "resolution")) \
+        or event_class(l) == "nonscored"
+
+STATUS_HEADS = {"WITHDRAWN": "withdrawn"}   # mirrors ledger_invariants.STATUS_HEADS
+
+def status_class(l):
+    """Terminal disposition on a bare `status` — no event, no outcome/resolution. Narrow by
+    design: only declared heads classify (see ledger_invariants for the full rationale)."""
+    if l.get("event") or l.get("outcome") or l.get("resolution"): return None
+    s = str(l.get("status") or "").upper()
+    for head, cls in STATUS_HEADS.items():
+        if s.startswith(head): return cls
+    return None
+
 def is_declined(l):
     """Mirrors ledger_invariants.OUTCOME_DECLARED['declined'] (option 4, 2026-08-12):
     decided WITHOUT running. Terminal and counted, but never scoreable — the run never
@@ -146,9 +176,11 @@ def last_disposition(ls):
         # — {"resolution":"refused","outcome":"refuted-by-run"} is arc's ran-and-lost — and a
         # completed run filed as a walk-away would drop off the curve entirely.
         if verdict_of(l) is not None:        d = "verdict"
+        elif is_nonscored(l):                d = "nonscored"   # ran, did not adjudicate
         elif is_declined(l):                 d = "declined"
         elif is_void(l):                     d = "void"
         elif l.get("outcome") == "relabel":  d = "relabel"
+        elif status_class(l) == "withdrawn": d = "withdrawn"   # registered, never ran
     return d
 
 def is_substrate(l):
@@ -178,6 +210,11 @@ for line in open(LEDGER):
 resolved, voids, amended, inflight, corrections, multi_terminal, void_then_adjudicated = \
     [], [], [], [], [], [], []
 relabeled, closed_unscorable, event_nonscored, declined = [], [], [], []
+withdrawn = []   # 2026-08-14: registered, never run, replaced by a redesign (sb26-animfeedback-
+                 # draw1). Its own bucket, NOT folded into declined — arc's line says "Not a
+                 # verdict on the lever", and the DECLINED face asks whether we were right to
+                 # walk away from bets we rated well. A bet nobody walked away from would be a
+                 # wrong answer to that question, in the flattering direction.
 for pid in order:
     lines = by_id[pid]
     priors    = [l for l in lines if prior_of(l) is not None]
@@ -208,9 +245,15 @@ for pid in order:
                          "y": verdict_of(terminals[-1]),
                          "ct": prior.get("claimType") or prior.get("scope")})
     elif any(is_void(l) for l in outs):                                   voids.append(pid)
-    elif any(event_class(l) == "nonscored" for l in outs) or \
+    elif any(is_nonscored(l) for l in outs) or \
          (substrate and any(l.get("event") == "resolution" for l in outs)):
-        event_nonscored.append(pid)  # GRAY power-statement / substrate answer — terminal, off the curve
+        event_nonscored.append(pid)  # GRAY power-statement / substrate answer — terminal, off the
+                                     # curve. is_nonscored (2026-08-14) widens this from the
+                                     # event-form GRAY* head to the word form too, so `gray` and
+                                     # `inconclusive` land here rather than reading in-flight
+                                     # forever and holding n back with them.
+    elif any(status_class(l) == "withdrawn" for l in lines):
+        withdrawn.append(pid)        # registered, never ran, superseded by a redesign
     elif any(l.get("outcome") == "amended-before-running" for l in outs): amended.append(pid)
     elif any(l.get("status") == "closed" or l.get("outcome") == "closed" for l in lines):
         closed_unscorable.append(pid)  # closed without a whitelisted verdict word
@@ -321,7 +364,9 @@ if relabeled:
 if closed_unscorable:
     print(f"            closed-unscorable (no whitelisted verdict word — CAUTION/MIXED/etc.): {_lst(closed_unscorable)}")
 if event_nonscored:
-    print(f"            event-resolved non-scored (GRAY power-statement / substrate measurement): {_lst(event_nonscored)}")
+    print(f"            ran-but-did-not-adjudicate (GRAY/inconclusive/substrate measurement): {_lst(event_nonscored)}")
+if withdrawn:
+    print(f"            withdrawn-unrun (registered, never ran, superseded by a redesign): {_lst(withdrawn)}")
 if corrections:    print(f"  note-corrections seen (verdict untouched): {_lst(corrections)}")
 if multi_terminal: print(f"  multi-terminal ids (LAST adjudication used): {_lst(multi_terminal)}")
 if void_then_adjudicated:
@@ -395,7 +440,7 @@ if "--json" in sys.argv:
            "buckets": {"resolved": [r["id"] for r in resolved], "in_flight": inflight,
                        "declined": declined, "void": voids, "relabeled": relabeled,
                        "event_nonscored": event_nonscored, "amended": amended,
-                       "closed_unscorable": closed_unscorable},
+                       "closed_unscorable": closed_unscorable, "withdrawn": withdrawn},
            "last_resolved_ts": resolved[-1]["ts"]}
     if era_out: out["split"] = era_out
     os.makedirs(os.path.dirname(OUTJSON), exist_ok=True)

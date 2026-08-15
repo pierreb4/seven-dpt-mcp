@@ -149,6 +149,13 @@ def verdict_of(l):
         if not w: continue
         v = _verdict_word(w)
         if v: return v
+    # Word-form GRAY (2026-08-14). Mirrors `ec == "nonscored"` above: terminal, counted as a
+    # completed run, never scored. Deliberately a SECOND pass, not folded into the loop above:
+    # a verdict on EITHER field must win over a non-scoring word on the other, or a line like
+    # {"resolution":"failed","outcome":"ran-and-grayed"} would read gray and drop a real
+    # failure off the curve. Verdict anywhere beats gray anywhere.
+    for w in (l.get("outcome"), l.get("resolution")):
+        if w and outcome_class(str(w)) == "nonscored": return "gray"
     if l.get("status") == "closed":
         head = ((l.get("result") or "").split() or [""])[0].strip(".,;:—-*")
         return _HEADS.get(head)
@@ -200,6 +207,21 @@ OUTCOME_DECLARED = {
     # Declared here so the reason word WINS over the verdict field (outcome is checked first),
     # and taught to verdict_of below so it actually scores as a failure.
     "refuted-by-run": "verdict",
+    # 2026-08-14 overnight — THE MIDDLE WORLD ARRIVES AS VOCABULARY. The §5 taxonomy we sent
+    # arc (evidence-negative / no-scoreable-result / unresolved) came back written INTO the
+    # ledger as first-class verdicts: `gray` (ran, in-band, no capability move) and
+    # `inconclusive` (ran, CI does not discriminate). Both are RAN-AND-DID-NOT-ADJUDICATE:
+    # terminal, counted as a completed attempt, NEVER scored — there is no ground truth to
+    # grade a prior against when the run could not tell the two hypotheses apart. This is the
+    # word-form of the event-form GRAY* head that has existed since v3.1, and it MUST classify
+    # identically or the same concept gets two answers depending on which dialect it arrived
+    # in — the exact failure the tripwire exists to catch. The two parsers then diverge ON
+    # PURPOSE, mirroring what they already do for event-form GRAY: invariants counts it as a
+    # completed run (a family that grayed three times HAS attempted three times), calibration
+    # keeps it off the curve (a gray has no y to score). Reason words declared alongside so
+    # each stays readable alone.
+    "gray": "nonscored", "inconclusive": "nonscored",
+    "ran-and-grayed": "nonscored", "ran-and-inconclusive": "nonscored",
     # NOT declared, deliberately: `amends …`. Arc's rule (2026-08-13) is SUPERSEDE — the latest
     # line carrying a declared verdict is the disposition, earlier ones are superseded, and an
     # amendment closes the old bet AT THE AMENDING VERDICT rather than reopening it. So `amends`
@@ -257,9 +279,40 @@ def is_declined(l):
 # as an ordinary forecast (it did — it was one of the two entries that took n 40→42).
 KIND_TOKENS = {"substrate", "pilot", "instrument", "lever", "desk-probe",
                "protocol", "kernel-arm", "control", "probe",
-               "kernel-ab"}   # 2026-08-13: A/B kernel run (tr87-pair-x-rot-joint). Carries a
+               "kernel-ab",   # 2026-08-13: A/B kernel run (tr87-pair-x-rot-joint). Carries a
                               # real prior on a real lever, so scoring it as an ordinary
                               # forecast is correct — it is NOT a measurement draw.
+               # 2026-08-14: SIX AT ONCE, and they are a THIRD GENUS. Every kind until now
+               # answered "what IS this bet?" — a lever, a desk probe, a measurement draw.
+               # These answer "what is this LINE doing to a bet that already exists?": a lane
+               # note, a hygiene fix, a withdrawal, a re-priced prior, a changed selection
+               # rule, a refined channel. They are annotations, and the arrival of six in one
+               # night says arc now stamps `kind` on every line rather than only registrations.
+               # Declaring them changes NO count — none is `substrate`, so none suppresses
+               # scoring, which is correct: a `lane-note` on a live bet must not silently take
+               # that bet off the curve. If a future annotation SHOULD suppress scoring it has
+               # to say `substrate`; that is the one rule this genus must not quietly acquire.
+               "withdrawal", "prior-amendment", "selection-rule-amendment",
+               "lane-note", "ledger-hygiene", "channel-refinement"}
+
+# ── STATUS-ONLY TERMINALS (2026-08-14) ───────────────────────────────────────
+# A third channel, found the hard way: sb26-animfeedback-draw1 was WITHDRAWN UNRUN with zero
+# GPU spent, and the line carries neither `event` nor `outcome`/`resolution` — the disposition
+# is in a bare `status`. Both the event tripwire (needs `event`) and the word tripwire (needs
+# outcome/resolution) are blind to it BY CONSTRUCTION, so the bet read live forever and no
+# alert fired. Deliberately NARROW: only declared heads classify, everything else returns None
+# and the line stays invisible exactly as before. Censusing all of `status` was rejected —
+# "PRE-RUN — zero GPU spent…", "STAGED", "NAMED-not-staged" are prose, and alerting on prose
+# is what makes a tripwire get ignored.
+STATUS_HEADS = {"WITHDRAWN": "withdrawn"}
+
+def status_class(l):
+    """Terminal disposition arriving on a bare `status` (no event, no outcome/resolution)."""
+    if l.get("event") or l.get("outcome") or l.get("resolution"): return None
+    s = str(l.get("status") or "").upper()
+    for head, cls in STATUS_HEADS.items():
+        if s.startswith(head): return cls
+    return None
 
 def kind_tokens(l):
     return {t for t in re.split(r"[+/,;\s]+", str(l.get("kind") or "").lower()) if t}
@@ -314,6 +367,15 @@ def pair(lines):
         elif any(is_declined(l) for l in ls):
             continue                                   # decided WITHOUT running: terminal, never
                                                        # scoreable, counted on its own DECLINED face
+        elif any(status_class(l) == "withdrawn" for l in ls):
+            continue                                   # WITHDRAWN UNRUN (2026-08-14): registered,
+                                                       # never run, replaced by a redesign. Kept
+                                                       # SEPARATE from declined on purpose — arc's
+                                                       # line says "Not a verdict on the lever", so
+                                                       # folding it into DECLINED would corrupt that
+                                                       # face's question (were we right to WALK AWAY
+                                                       # from bets we rated well?) with bets nobody
+                                                       # walked away from.
         elif any(l.get("status") == "closed" or l.get("outcome") == "closed" for l in ls):
             continue                                   # closed without a whitelisted verdict — unscorable, out
         elif priors:
@@ -531,6 +593,8 @@ def main():
         c = disposition(l)[1]
         if c == "NEW":
             c = _EV_CLS.get(event_class(l) or "", "NEW")
+        if c == "NEW":
+            c = status_class(l) or "NEW"    # third channel: bare-status terminals (WITHDRAWN)
         if c != "NEW": final_cls[pid] = c
     out["disposition"] = final_cls      # published so self_check can hold this view against
                                         # pair()'s: on 08-13 they disagreed about tr87-lens-

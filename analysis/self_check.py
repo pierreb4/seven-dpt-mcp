@@ -99,7 +99,8 @@ check("calibration: every id in at most one bucket", not dupes,
 #      evidence-negative alert against it as a live bet. Class names, not words: which WORDS
 #      are terminal is the dialect layer's business, and duplicating that judgement here would
 #      re-import the thing being checked.
-TERMINAL_CLASSES = {"verdict", "void", "declined", "adjudication", "unscorable", "nonscored"}
+TERMINAL_CLASSES = {"verdict", "void", "declined", "adjudication", "unscorable", "nonscored",
+                    "withdrawn"}   # 2026-08-14: bare-status terminal (WITHDRAWN UNRUN)
 disp = inv.get("disposition") or {}
 if disp:
     contra = sorted(i for i, c in disp.items() if c in TERMINAL_CLASSES and i in inv_inflight)
