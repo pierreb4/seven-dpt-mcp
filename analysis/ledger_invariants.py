@@ -321,7 +321,19 @@ KIND_TOKENS = {"substrate", "pilot", "instrument", "lever", "desk-probe",
                # so it leaves the registered forecast standing to be scored on its own terms.
                # Worth noting what the smoke line bought, because the ledger now shows it: 12
                # minutes returned the mechanism after three full runs had returned nothing.
-               "mechanism-fix", "smoke-result"}
+               "mechanism-fix", "smoke-result",
+               # 2026-08-16 evening, arc's hygiene wave (they now stamp kind on every line):
+               # `adversary-block`  pre-push kill by the adversary rider (memlens-nowipe) —
+               #                    the bet's FATE travels on the paired pre-run relabel line,
+               #                    which pair() reads; the status prose here stays unparsed.
+               # `parked`           bet shelved to ride a future arm (memlens-rider); same
+               #                    division of labour as adversary-block.
+               # `channel-stamp`    pre-run amendment restoring a lapsed channel field —
+               #                    arc adopting the 08-16 morning ask, same day.
+               # `scoring-note`     meta note on scorability (ship-animfeedback: accepted
+               #                    one-question-one-id-one-prior). Annotation, never a bet.
+               # None says `substrate`, so none suppresses scoring — correct for all four.
+               "adversary-block", "parked", "channel-stamp", "scoring-note"}
 
 # ── STATUS-ONLY TERMINALS (2026-08-14) ───────────────────────────────────────
 # A third channel, found the hard way: sb26-animfeedback-draw1 was WITHDRAWN UNRUN with zero
@@ -406,6 +418,21 @@ def pair(lines):
                                                        # walked away from.
         elif any(l.get("status") == "closed" or l.get("outcome") == "closed" for l in ls):
             continue                                   # closed without a whitelisted verdict — unscorable, out
+        elif (rl := [k for k, l in enumerate(ls) if l.get("outcome") == "relabel"]) and \
+             not any(prior_of(l) is not None for l in ls[rl[-1] + 1:]):
+            continue                                   # PRE-RUN RELABEL (2026-08-16, memlens pair):
+                                                       # every earlier relabel FOLLOWED a verdict and
+                                                       # is handled by the supersede mirror above;
+                                                       # this one closes a bet that never ran (arc:
+                                                       # "closing and re-opening is the append-only
+                                                       # ledger's only honest correction path"). NOT
+                                                       # an attempt — nothing ran — so out of both
+                                                       # sets, mirroring calibration's relabeled
+                                                       # bucket. A registration line AFTER the last
+                                                       # relabel REOPENS the id (arc's re-register
+                                                       # path; their new convention stamps `ts` on
+                                                       # re-registrations so the composite dedupe
+                                                       # cannot eat a byte-identical line).
         elif priors:
             inflight.append({"id": i, "pre": priors[0]})
     return resolved, inflight

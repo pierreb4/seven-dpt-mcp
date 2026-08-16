@@ -44,6 +44,15 @@ python3 "$HERE/self_check.py"
 SC_RC=$?
 set -e
 
+# Recon face (spark #48, 2026-08-16): transient channel over tracked EXTERNAL primaries
+# (launch/sources.jsonl). Print-only, rc deliberately not consulted — an edit on someone
+# else's website must never flip the audit rc, which speaks only about the decision record.
+# SOURCES_SKIP=1 skips it entirely (offline mornings).
+if [ "${SOURCES_SKIP:-0}" != 1 ]; then
+  echo "== sources (recon)"
+  python3 "$HERE/sources_diff.py" || true
+fi
+
 # A contradiction BETWEEN faces outranks any alert FROM a face: if the layers disagree about
 # what happened, no number in this sweep has been established yet. rc=2 says so distinctly.
 if [ "$SC_RC" -ne 0 ]; then exit "$SC_RC"; fi
