@@ -2,6 +2,12 @@
 node_modules/
 dist/
 
+# python bytecode — analysis/ is run as scripts, never imported as a package;
+# these appeared once self_check.py started importing nothing and the sweep
+# began invoking the parsers directly
+__pycache__/
+*.pyc
+
 # editor / OS cruft
 *.tmp
 *.swp
