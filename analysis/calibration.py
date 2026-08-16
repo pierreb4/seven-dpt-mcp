@@ -145,6 +145,23 @@ def is_nonscored(l):
                for f in ("outcome", "resolution")) \
         or event_class(l) == "nonscored"
 
+SPLIT_WORDS = ("split",)
+
+def is_split(l):
+    """One run, several pre-declared questions, DIFFERENT verdicts (2026-08-16). Mirrors
+    ledger_invariants.OUTCOME_DECLARED['split']='unscorable'. Terminal — the run happened —
+    but never scoreable: two answers cannot be graded against one prior, and on the first
+    line of this shape there is no prior at all.
+
+    Checked on `resolution` and `outcome` alike, but note what protects the curve here: the
+    compound word is "SEAM CLEARED / LEVER BELOW BAND", and verdict_of only fires on a
+    startswith, so the embedded CLEARED is not read as a verdict today. That is luck of word
+    order, not a guarantee — a future line reading "CLEARED on the seam / BELOW BAND on the
+    lever" WOULD score 1 against a single prior on an id that has one. If that shape appears,
+    is_split has to move ahead of verdict_of in last_disposition rather than beside it."""
+    return any(str(l.get(f) or "").lower().startswith(SPLIT_WORDS)
+               for f in ("outcome", "resolution"))
+
 STATUS_HEADS = {"WITHDRAWN": "withdrawn"}   # mirrors ledger_invariants.STATUS_HEADS
 
 def status_class(l):
@@ -181,6 +198,7 @@ def last_disposition(ls):
         elif is_void(l):                     d = "void"
         elif l.get("outcome") == "relabel":  d = "relabel"
         elif status_class(l) == "withdrawn": d = "withdrawn"   # registered, never ran
+        elif is_split(l):                    d = "split"       # ran, answered several questions
     return d
 
 def is_substrate(l):
@@ -215,6 +233,8 @@ withdrawn = []   # 2026-08-14: registered, never run, replaced by a redesign (sb
                  # verdict on the lever", and the DECLINED face asks whether we were right to
                  # walk away from bets we rated well. A bet nobody walked away from would be a
                  # wrong answer to that question, in the flattering direction.
+split_unscorable = []   # 2026-08-16: ran, answered several pre-declared questions with different
+                        # verdicts (ship-animfeedback-draw1). Terminal, counted, never scored.
 for pid in order:
     lines = by_id[pid]
     priors    = [l for l in lines if prior_of(l) is not None]
@@ -231,6 +251,15 @@ for pid in order:
                                          # it is still a refusal, and dropping it here would make
                                          # this header disagree with the invariants DECLINED face
                                          # (it did: `declined 0` vs `DECLINED 1`, 2026-08-12).
+    if last_disposition(lines) == "split":
+        split_unscorable.append(pid); continue
+        # BEFORE the no-prior guard, on purpose. ship-animfeedback-draw1 has no prereg at all,
+        # so the guard below would `continue` past every branch and the id would land in NO
+        # bucket — invisible here while ledger_invariants prints a SPLIT RESULT face for it.
+        # That is exactly the 2026-08-12 cross-layer drift (`declined 0` vs `DECLINED 1`), where
+        # a no-prior guard ate a class before its branch could run. The standing lesson from
+        # that one is the reason this line sits where it does: walk a NEW CLASS through every
+        # layer's early exits before believing the branch you wrote is the branch that runs.
     if not priors:
         continue  # outcome-only id (shouldn't happen; visible via line-count check below)
     prior = priors[-1]
@@ -367,6 +396,8 @@ if event_nonscored:
     print(f"            ran-but-did-not-adjudicate (GRAY/inconclusive/substrate measurement): {_lst(event_nonscored)}")
 if withdrawn:
     print(f"            withdrawn-unrun (registered, never ran, superseded by a redesign): {_lst(withdrawn)}")
+if split_unscorable:
+    print(f"            split-result (ran, several questions, different verdicts, one prior at most): {_lst(split_unscorable)}")
 if corrections:    print(f"  note-corrections seen (verdict untouched): {_lst(corrections)}")
 if multi_terminal: print(f"  multi-terminal ids (LAST adjudication used): {_lst(multi_terminal)}")
 if void_then_adjudicated:
@@ -440,7 +471,8 @@ if "--json" in sys.argv:
            "buckets": {"resolved": [r["id"] for r in resolved], "in_flight": inflight,
                        "declined": declined, "void": voids, "relabeled": relabeled,
                        "event_nonscored": event_nonscored, "amended": amended,
-                       "closed_unscorable": closed_unscorable, "withdrawn": withdrawn},
+                       "closed_unscorable": closed_unscorable, "withdrawn": withdrawn,
+                       "split_unscorable": split_unscorable},
            "last_resolved_ts": resolved[-1]["ts"]}
     if era_out: out["split"] = era_out
     os.makedirs(os.path.dirname(OUTJSON), exist_ok=True)

@@ -222,6 +222,21 @@ OUTCOME_DECLARED = {
     # each stays readable alone.
     "gray": "nonscored", "inconclusive": "nonscored",
     "ran-and-grayed": "nonscored", "ran-and-inconclusive": "nonscored",
+    # 2026-08-16 — ONE RUN, TWO PRE-DECLARED QUESTIONS, TWO DIFFERENT VERDICTS.
+    # ship-animfeedback-draw1 arrived as {"resolution":"split",
+    # "outcome":"SEAM CLEARED / LEVER BELOW BAND"} with `seam_result` and `lever_result` as
+    # separate fields and arc's own instruction on the line: "These must not be conflated."
+    # The layer's whole model is one id -> one disposition, so it had no way to read this and
+    # the census reported the head word `SEAM` as undeclared vocabulary.
+    # Declared on `resolution` and NOT on `SEAM`, deliberately. A `"seam": "verdict"` entry
+    # would let longest-prefix match collapse "SEAM CLEARED / LEVER BELOW BAND" to a single
+    # CLEARED — performing exactly the conflation the line forbids, and booking a positive for
+    # a half that was never registered. `split` names the shape instead of picking a winner.
+    # UNSCORABLE is the honest class: the run happened (terminal, counted as an attempt), but
+    # there is no single prior to grade two answers against — and on this id there is no prior
+    # at all, since it never registered a prereg. See the SPLIT RESULT face below, which keeps
+    # the id named out loud rather than letting a headline result rest quietly in a bucket.
+    "split": "unscorable",
     # NOT declared, deliberately: `amends …`. Arc's rule (2026-08-13) is SUPERSEDE — the latest
     # line carrying a declared verdict is the disposition, earlier ones are superseded, and an
     # amendment closes the old bet AT THE AMENDING VERDICT rather than reopening it. So `amends`
@@ -293,7 +308,20 @@ KIND_TOKENS = {"substrate", "pilot", "instrument", "lever", "desk-probe",
                # that bet off the curve. If a future annotation SHOULD suppress scoring it has
                # to say `substrate`; that is the one rule this genus must not quietly acquire.
                "withdrawal", "prior-amendment", "selection-rule-amendment",
-               "lane-note", "ledger-hygiene", "channel-refinement"}
+               "lane-note", "ledger-hygiene", "channel-refinement",
+               # 2026-08-16, both on untried-action-completion, both the same genus as the six
+               # above — they act on a bet that already exists and neither resolves it.
+               # `mechanism-fix`  the lever's implementation changed pre-run (v3 builds `tried`
+               #                  from EXECUTED actions, not REQUESTED); registration, game,
+               #                  endpoint, MDE and criterion all unchanged.
+               # `smoke-result`   a gated cheap pass run BEFORE the arms are allowed to spend.
+               # Neither says `substrate`, so neither suppresses scoring — right in both cases:
+               # a pre-run mechanism fix must not take a live bet off the curve, and a smoke
+               # pass measures the INSTRUMENT (did the lever fire at all?), not the endpoint,
+               # so it leaves the registered forecast standing to be scored on its own terms.
+               # Worth noting what the smoke line bought, because the ledger now shows it: 12
+               # minutes returned the mechanism after three full runs had returned nothing.
+               "mechanism-fix", "smoke-result"}
 
 # ── STATUS-ONLY TERMINALS (2026-08-14) ───────────────────────────────────────
 # A third channel, found the hard way: sb26-animfeedback-draw1 was WITHDRAWN UNRUN with zero
@@ -870,6 +898,43 @@ def main():
         out["declined"] = {"ids": dec_ids, "priors": dec_p,
                            "mean_prior": round(sum(withp)/len(withp), 3) if withp else None,
                            "no_prior": miss}
+
+    # ── SPLIT RESULT (2026-08-16) ──
+    # One run, several pre-declared questions, DIFFERENT verdicts. `split` classifies as
+    # unscorable so nothing is booked against a prior that does not exist — but a bucket is
+    # where a result goes to be forgotten, and the first line of this shape carried the
+    # programme's most notable positive of the week (the framework seam scored, against an
+    # 0-for-7 record) beside a negative on the other half. Both halves are real; neither is
+    # scoreable as filed. So the face NAMES it every sweep instead of letting `unscorable`
+    # absorb it silently. It reports each half from the ledger's own `*_result` fields rather
+    # than re-reading the compound outcome string, because parsing "A CLEARED / B BELOW BAND"
+    # into halves would be the layer inventing a verdict per half — which is the conflation
+    # the `split` declaration exists to refuse.
+    split_ids = [i for i in dict.fromkeys(l.get("id") for l in lines)
+                 if any(l.get("id") == i and str(disposition(l)[0]).lower().startswith("split")
+                        for l in lines)]
+    if split_ids:
+        rows = []
+        for i in split_ids:
+            ls    = [l for l in lines if l.get("id") == i]
+            halves = sorted({f[:-len("_result")] for l in ls for f in l
+                             if f.endswith("_result") and l.get(f)})
+            has_p = i in prior_ids
+            rows.append((i, halves, has_p))
+            print(f"\nSPLIT RESULT  {i} — {len(halves) or '?'} question(s) answered on one line"
+                  f"{' (' + ', '.join(halves) + ')' if halves else ''} ·"
+                  f" {'prior registered' if has_p else 'NO PREREG — no prior on any half'}")
+        unreg = [i for i, _, p in rows if not p]
+        if unreg:
+            alerts.append(
+                f"ALERT split-result: {', '.join(unreg)} resolved SEVERAL pre-declared questions"
+                " with different verdicts and registered no prior, so every half scores nothing"
+                " and counts nowhere. A split result is only auditable if each question is its"
+                " own id with its own prior — register the halves that are still live SEPARATELY"
+                " before the next draw; the ones already resolved cannot be scored after the fact")
+        out["split_result"] = {"ids": split_ids,
+                               "halves": {i: h for i, h, _ in rows},
+                               "unregistered": unreg}
 
     # ── KIND CENSUS ── kind is tokenised, so a compound value still hits its rules; an
     # unrecognised token is the moment a new registration class appears, and if it means
