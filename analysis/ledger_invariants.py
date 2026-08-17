@@ -25,7 +25,8 @@ Reads the same two-line JSONL ledger as calibration.py (pre-registration lines c
                 but not judged (no bar-matching without a unit token) — reported, so the
                 check's own blind spot is visible.
   CHANNEL STAMP a lever should name the channel it acts through and that channel's measured
-                liveness (`channel` [+ `liveness`] fields on the prereg line) — the
+                liveness (`channel` [+ `liveness`] fields on the prereg line, or on ANY later
+                line of the id — retro kind=channel-stamp amendments count, 2026-08-17) — the
                 discipline that prevents optimizing a channel that is 0% of the live path.
                 Coverage is reported; missing stamps WARN (ALERT with CHANNEL_STRICT=1).
   FAMILY MIX    (spark #45, 2026-08-11; Leek temperature-zero) the ledger is SELF-CENSORED
@@ -333,7 +334,27 @@ KIND_TOKENS = {"substrate", "pilot", "instrument", "lever", "desk-probe",
                # `scoring-note`     meta note on scorability (ship-animfeedback: accepted
                #                    one-question-one-id-one-prior). Annotation, never a bet.
                # None says `substrate`, so none suppresses scoring — correct for all four.
-               "adversary-block", "parked", "channel-stamp", "scoring-note"}
+               "adversary-block", "parked", "channel-stamp", "scoring-note",
+               # 2026-08-17, semantics from arc's own ledger line (id kind-dialect-semantics,
+               # commit e21349b) — asked-first per the 08-12 tripwire lesson:
+               # `hidden-draw`  SCORED forecast about a MEASUREMENT quantity: the prior prices
+               #                P(same-build hidden draw lands in the declared band). Never a
+               #                lever bet — a below-band outcome scores the FORECAST wrong
+               #                without killing any lever (§9.397 precedent: below-band means
+               #                investigate the backend, not change adoptions). Scoring as an
+               #                ordinary forecast is therefore correct; no substrate.
+               # `eval`         SCORED forecast, prior prices P(PROCEED); the VOID-on-substrate
+               #                carve-out travels on outcome words at resolution, same as
+               #                kernel-ab. No substrate in the KIND.
+               # `amendment`    annotation genus, generic parent — arc left the vocabulary
+               #                economy to this layer; one parent beats minting a species per
+               #                correction (the instance was a draw-COUNT fix). Same genus
+               #                rule: it does not say substrate, so it never suppresses scoring.
+               # `register-then-refuse`  the kind on an option-4 declined registration (prior
+               #                + resolution "refused" on one line); the declined classing
+               #                travels on the RESOLUTION word, declared 2026-08-12 — the kind
+               #                is the protocol's label, not a class of its own.
+               "hidden-draw", "eval", "amendment", "register-then-refuse"}
 
 # ── STATUS-ONLY TERMINALS (2026-08-14) ───────────────────────────────────────
 # A third channel, found the hard way: sb26-animfeedback-draw1 was WITHDRAWN UNRUN with zero
@@ -630,6 +651,20 @@ def main():
         if pid is None or pid in seen_pre or prior_of(l) is None: continue
         seen_pre.add(pid); preregs.append(l)
 
+    # Stamps arrive as append-only AMENDMENTS as often as prereg fields: arc's 2026-08-17
+    # retro wave put `channel`/`family` on kind=channel-stamp lines, and this face — reading
+    # only the prereg line — kept WARNing on ids that had already complied. Same lesson as
+    # the denominator note above: a compliance face that cannot see append-only compliance
+    # teaches the reader their effort went unseen. So stamps are per-ID, from ANY line;
+    # FIRST value wins (a registration-time declaration beats a later retro stamp).
+    id_stamps = {"channel": {}, "family": {}}
+    for l in lines:
+        pid = l.get("id")
+        if pid is None: continue
+        for f in ("channel", "family"):
+            if l.get(f) and pid not in id_stamps[f]:
+                id_stamps[f][pid] = (str(l.get("ts") or ""), str(l.get(f)))
+
     # FINAL disposition per id — computed ONCE here and used by every face below. The ledger is
     # append-only, so a later line supersedes an earlier one: shapeid-rot-rung (2026-08-12)
     # refuses, then AMENDS that refusal to void 80 minutes later. A per-line `any(is_declined)`
@@ -657,12 +692,17 @@ def main():
                                         # noticed, because the two views were never compared.
 
     def stamp_face(field):
-        """-> (n_stamped, missing_ids, since_ts, recent, recent_missing_ids)"""
-        st   = [l for l in preregs if l.get(field)]
-        miss = [l.get("id") for l in preregs if not l.get(field)]
-        since = min((str(l.get("ts") or "") for l in st), default="")
+        """-> (n_stamped, missing_ids, since_ts, recent, recent_missing_ids)
+        Reads id_stamps (any line of the id), not the prereg line. `since` = the earliest
+        stamp ACT on a registered id — inline prereg ts or amendment ts, whichever wrote the
+        first stamp — so a retro wave over old ids cannot drag adoption earlier than the
+        practice actually began, and prereg recency stays registration-time."""
+        sm   = id_stamps[field]
+        st   = [l for l in preregs if l.get("id") in sm]
+        miss = [l.get("id") for l in preregs if l.get("id") not in sm]
+        since = min((sm[l.get("id")][0] for l in st), default="")
         recent = [l for l in preregs if since and str(l.get("ts") or "") >= since] if st else []
-        rmiss  = [l.get("id") for l in recent if not l.get(field)]
+        rmiss  = [l.get("id") for l in recent if l.get("id") not in sm]
         return len(st), miss, since, recent, rmiss
 
     n_ch, ch_miss, ch_since, ch_recent, ch_rmiss = stamp_face("channel")
@@ -716,8 +756,9 @@ def main():
         if pid is None: continue
         if prior_of(l) is not None and pid not in seen_prereg:
             seen_prereg.add(pid)
-            fam = family_of(pid, l)
-            if l.get("family"): stamped_fam += 1
+            # explicit family from ANY line of the id (retro stamps included) beats retro rules
+            fam = (id_stamps["family"].get(pid) or (None, None))[1] or family_of(pid, l)
+            if pid in id_stamps["family"]: stamped_fam += 1
             lev = lever_of(pid)
             st = fam_stat.setdefault(fam, {"preregs": 0, "levers": set(), "pos": 0,
                                            "flagged": False, "attempts": 0, "alevers": set(),
