@@ -109,7 +109,8 @@ def verdict_of(l):
     # present one made this return None for {"resolution":"cleared","outcome":"positive-below-
     # threshold"} — a cleared bet silently off the curve. `refuted-by-run` is arc's token for
     # ran-and-lost, minted so a completed negative is not filed as a walk-away.
-    for w in (l.get("outcome"), l.get("resolution")):
+    # result_field: third carrier, kind=resolution lines only (2026-08-18).
+    for w in (l.get("outcome"), l.get("resolution"), result_field(l)):
         lw = str(w or "").lower()
         if lw.startswith("cleared"): return 1
         if lw.startswith(("failed", "refuted-by-run")): return 0
@@ -123,7 +124,8 @@ VOID_WORDS = ("void", "instrument-inadequate")   # instrument-inadequate: arrive
                                                  # measure, so no information either way.
 
 def is_void(l):
-    return any(str(l.get(f) or "").lower().startswith(VOID_WORDS) for f in ("outcome", "resolution")) \
+    return any(str(w or "").lower().startswith(VOID_WORDS)
+               for w in (l.get("outcome"), l.get("resolution"), result_field(l))) \
         or event_class(l) == "void"
 
 NONSCORED_WORDS = ("gray", "inconclusive", "ran-and-grayed", "ran-and-inconclusive")
@@ -141,8 +143,8 @@ def is_nonscored(l):
     attempted three times); HERE verdict_of must keep returning None so it never reaches
     `resolved`. Same word, two correct answers, because the two files measure different
     things."""
-    return any(str(l.get(f) or "").lower().startswith(NONSCORED_WORDS)
-               for f in ("outcome", "resolution")) \
+    return any(str(w or "").lower().startswith(NONSCORED_WORDS)
+               for w in (l.get("outcome"), l.get("resolution"), result_field(l))) \
         or event_class(l) == "nonscored"
 
 SPLIT_WORDS = ("split",)
@@ -159,8 +161,8 @@ def is_split(l):
     order, not a guarantee — a future line reading "CLEARED on the seam / BELOW BAND on the
     lever" WOULD score 1 against a single prior on an id that has one. If that shape appears,
     is_split has to move ahead of verdict_of in last_disposition rather than beside it."""
-    return any(str(l.get(f) or "").lower().startswith(SPLIT_WORDS)
-               for f in ("outcome", "resolution"))
+    return any(str(w or "").lower().startswith(SPLIT_WORDS)
+               for w in (l.get("outcome"), l.get("resolution"), result_field(l)))
 
 STATUS_HEADS = {"WITHDRAWN": "withdrawn"}   # mirrors ledger_invariants.STATUS_HEADS
 
@@ -179,8 +181,8 @@ def is_declined(l):
     happened, so there is no ground truth to grade the stated prior against. Under the
     register-then-refuse protocol these ids DO carry a prior, so without this branch they
     would read in-flight forever."""
-    return any(str(l.get(f) or "").lower().startswith(("refused", "declined", "premise-refuted"))
-               for f in ("outcome", "resolution"))
+    return any(str(w or "").lower().startswith(("refused", "declined", "premise-refuted"))
+               for w in (l.get("outcome"), l.get("resolution"), result_field(l)))
 
 def last_disposition(ls):
     """Last readable disposition on an id — the ledger is append-only, so a later line
@@ -201,11 +203,21 @@ def last_disposition(ls):
         elif is_split(l):                    d = "split"       # ran, answered several questions
     return d
 
+def kind_tokens(l):
+    return {t for t in re.split(r"[+/,;\s]+", str(l.get("kind") or "").lower()) if t}
+
 def is_substrate(l):
     """Mirrors ledger_invariants.py. `kind` is TOKENISED, not compared whole: a compound
     value (`substrate+pilot`, 2026-08-12) must still hit the substrate rule, or a
     measurement draw scores as an ordinary forecast — which it did, silently."""
-    return "substrate" in {t for t in re.split(r"[+/,;\s]+", str(l.get("kind") or "").lower()) if t}
+    return "substrate" in kind_tokens(l)
+
+def result_field(l):
+    """Mirrors ledger_invariants.py. `result` as a verdict carrier, ONLY on kind=resolution
+    lines (declared 2026-08-18, arc's kind-dialect-semantics-2: 'classing rides the `result`
+    word'). Everywhere else `result` stays v2 prose, read solely under status=closed via the
+    _HEADS whitelist — opening it on every line would let free text score."""
+    return l.get("result") if "resolution" in kind_tokens(l) else None
 
 def wilson(k, n, z=1.96):
     if n == 0: return (0.0, 1.0)
@@ -239,7 +251,7 @@ for pid in order:
     lines = by_id[pid]
     priors    = [l for l in lines if prior_of(l) is not None]
     outs      = [l for l in lines if "outcome" in l or "resolution" in l or l.get("status") == "closed"
-                 or "event" in l]
+                 or "event" in l or result_field(l) is not None]
     terminals = [l for l in outs if verdict_of(l) is not None]
     verdicts  = [l for l in outs if verdict_of(l) is not None or l.get("outcome") == "relabel"]
     substrate = any(is_substrate(l) for l in lines)

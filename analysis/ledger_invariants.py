@@ -146,7 +146,8 @@ def verdict_of(l):
     # as {"resolution":"cleared","outcome":"positive-below-threshold"} and this returned None,
     # so pair() called a CLEARED bet in-flight while the dialect census called it cleared —
     # one file, two answers.
-    for w in (l.get("outcome"), l.get("resolution")):
+    # result_field: third carrier, kind=resolution lines only (2026-08-18).
+    for w in (l.get("outcome"), l.get("resolution"), result_field(l)):
         if not w: continue
         v = _verdict_word(w)
         if v: return v
@@ -155,7 +156,7 @@ def verdict_of(l):
     # a verdict on EITHER field must win over a non-scoring word on the other, or a line like
     # {"resolution":"failed","outcome":"ran-and-grayed"} would read gray and drop a real
     # failure off the curve. Verdict anywhere beats gray anywhere.
-    for w in (l.get("outcome"), l.get("resolution")):
+    for w in (l.get("outcome"), l.get("resolution"), result_field(l)):
         if w and outcome_class(str(w)) == "nonscored": return "gray"
     if l.get("status") == "closed":
         head = ((l.get("result") or "").split() or [""])[0].strip(".,;:—-*")
@@ -273,7 +274,7 @@ def outcome_class(w):
 # tripwire condition: genuinely unreadable, and that is what now alerts.
 def disposition(l):
     """-> (word, class). class 'NEW' means no field on the line was readable."""
-    cand = [str(l.get(f)).strip() for f in ("outcome", "resolution") if l.get(f)]
+    cand = [str(w).strip() for w in (l.get("outcome"), l.get("resolution"), result_field(l)) if w]
     for w in cand:
         c = outcome_class(w)
         if c != "NEW": return w, c
@@ -284,7 +285,7 @@ def outcome_word(l):
 
 def has_reason(l):
     """True when the line carries a declared verdict AND a second, free-text reason field."""
-    return len([f for f in ("outcome", "resolution") if l.get(f)]) > 1 \
+    return len([w for w in (l.get("outcome"), l.get("resolution"), result_field(l)) if w]) > 1 \
         and disposition(l)[1] != "NEW"
 
 def is_declined(l):
@@ -354,7 +355,22 @@ KIND_TOKENS = {"substrate", "pilot", "instrument", "lever", "desk-probe",
                #                + resolution "refused" on one line); the declined classing
                #                travels on the RESOLUTION word, declared 2026-08-12 — the kind
                #                is the protocol's label, not a class of its own.
-               "hidden-draw", "eval", "amendment", "register-then-refuse"}
+               "hidden-draw", "eval", "amendment", "register-then-refuse",
+               # 2026-08-18, semantics from arc's kind-dialect-semantics-2 (commit c1069e7),
+               # asked-first again:
+               # `decision`    NON-SCORED ANNOTATION recording an owner directive; never
+               #               carries a prior, never resolves — citable provenance for later
+               #               registrations (type specimen opus-trace-corpus-decision). No
+               #               prior means pair() never sees the id; declaring only quiets
+               #               the tripwire.
+               # `resolution`  a TAG on resolution lines; the verdict rides the `result`
+               #               word (cleared/failed/void) — generic-parent pattern, like
+               #               amendment. Never a registration. Unlike every kind above,
+               #               this one needs PLUMBING, not just declaration: the tagged
+               #               line carries its verdict in a field no scanner read
+               #               (lora-conv-v32b-opus-train sat in-flight with `result:
+               #               cleared` on the ledger) — see result_field().
+               "decision", "resolution"}
 
 # ── STATUS-ONLY TERMINALS (2026-08-14) ───────────────────────────────────────
 # A third channel, found the hard way: sb26-animfeedback-draw1 was WITHDRAWN UNRUN with zero
@@ -380,6 +396,13 @@ def kind_tokens(l):
 
 def is_substrate(l):
     return "substrate" in kind_tokens(l)
+
+def result_field(l):
+    """`result` as a verdict carrier, ONLY on kind=resolution lines (declared 2026-08-18,
+    arc's kind-dialect-semantics-2: 'classing rides the `result` word'). Everywhere else
+    `result` stays v2 prose, read solely under status=closed via the _HEADS whitelist —
+    opening it on every line would let free text score."""
+    return l.get("result") if "resolution" in kind_tokens(l) else None
 
 def crit_of(pre):
     return pre.get("criterion") or pre.get("why") or ""
@@ -423,6 +446,7 @@ def pair(lines):
             resolved.append({"id": i, "pre": priors[0] if priors else {}, "res": verdictish[-1]})
         elif any(l.get("outcome") in ("void", "amended-before-running")
                  or (l.get("resolution") or "").lower().startswith("void")
+                 or str(result_field(l) or "").lower().startswith("void")
                  or event_class(l) == "void" for l in ls):
             continue                                   # no information / superseded — out of every invariant
         elif any(is_declined(l) for l in ls):
