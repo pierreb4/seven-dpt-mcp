@@ -23,7 +23,8 @@ PAIRING RULES (learned from the live ledger, not just the protocol):
 
 OUTPUT (text; at this n the binned table IS the reliability curve):
   1. reliability table   equal-count prior bins vs realized cleared-rate, Wilson 95% CIs
-  2. headline stats      base rate, mean stated prior, bias, Brier + skill vs base-rate ref, log-loss
+  2. headline stats      base rate, mean stated prior, bias, Brier + skill vs base-rate ref, log-loss,
+                         CORP decomposition (Brier = MCB - DSC + UNC, bin-free via PAV) with R = DSC/UNC
   3. de-bias map         intercept-only log-odds shift (headline) + Platt (a,b); --json persists it
   4. drift check         first half vs second half by pre-registration time
   5. exclusions report   voids / amended / in-flight / correction / multi-terminal ids
@@ -335,6 +336,34 @@ print(f"  Brier {brier:.3f} vs base-rate ref {brier_ref:.3f} -> skill {skill:+.2
       f"  ({'priors beat' if skill > 0 else 'priors LOSE to'} always-saying-{base:.2f})"
       f"  |  log-loss {logloss:.3f}")
 
+# ---- CORP decomposition (bin-free) -------------------------------------------------------------
+# Spark #33 prereg 2026-08-01, meter parked at the MDE wall; spark #34 gate (n>=50) tripped
+# 2026-08-19 at n=55 and the erasure-power probe booked CONTINUE (S(0.5)=2.48) — this block is
+# that prereg's shipped action. Math mirrors corp_meter_power.py: PAV isotonic fit, then
+# Brier = MCB - DSC + UNC exactly; R = DSC/UNC is the share of achievable resolution the
+# stated priors actually capture (0 = no ordering signal, 1 = all of it).
+def pav_fit(ps_, ys_):
+    idx = sorted(range(len(ps_)), key=lambda k: ps_[k])
+    blocks = []
+    for k in idx:
+        blocks.append([ys_[k], 1.0])
+        while len(blocks) > 1 and blocks[-2][0] / blocks[-2][1] > blocks[-1][0] / blocks[-1][1]:
+            s, c = blocks.pop(); blocks[-1][0] += s; blocks[-1][1] += c
+    flat = [s / c for s, c in blocks for _ in range(int(round(c)))]
+    q = [0.0] * len(ps_)
+    for pos, k in enumerate(idx): q[k] = flat[pos]
+    return q
+
+_bpav = sum((qi - y) ** 2 for qi, y in zip(pav_fit(ps, ys), ys)) / n
+unc = base * (1 - base)
+dsc = unc - _bpav                      # discrimination: what the isotonic re-map recovers
+mcb = brier - _bpav                    # miscalibration: what the re-map removes
+assert abs(brier - (mcb - dsc + unc)) < 1e-12, "CORP identity failed"
+corp_r = dsc / unc if unc > 0 else float("nan")
+print(f"  CORP  Brier {brier:.3f} = MCB {mcb:.3f} - DSC {dsc:.3f} + UNC {unc:.3f}"
+      f"  ->  R = DSC/UNC = {corp_r:.3f}"
+      f"  ({'priors ORDER outcomes' if corp_r > 0 else 'NO ordering signal'})")
+
 # ---- reliability table (equal-count bins) -----------------------------------------------------
 srt = sorted(resolved, key=lambda r: r["p"])
 bins = [srt[round(i * n / BINS): round((i + 1) * n / BINS)] for i in range(BINS)]
@@ -474,6 +503,8 @@ if "--json" in sys.argv:
     out = {"source": LEDGER, "n": n, "base_rate": round(base, 4), "mean_prior": round(mp, 4),
            "bias": round(bias, 4), "bias_inside_ci": inside, "brier": round(brier, 4),
            "skill": round(skill, 4), "logodds_shift": round(delta, 4),
+           "corp": {"mcb": round(mcb, 4), "dsc": round(dsc, 4), "unc": round(unc, 4),
+                    "R": round(corp_r, 4)},
            "platt": {"a": round(pa, 4), "b": round(pb, 4)},
            "scope": {"universal": n_u, "existential_bounded": n_e, "unstamped": n_un},
            # Buckets are persisted so self_check.py can hold this layer against
