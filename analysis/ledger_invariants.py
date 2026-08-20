@@ -370,7 +370,15 @@ KIND_TOKENS = {"substrate", "pilot", "instrument", "lever", "desk-probe",
                #               line carries its verdict in a field no scanner read
                #               (lora-conv-v32b-opus-train sat in-flight with `result:
                #               cleared` on the ledger) — see result_field().
-               "decision", "resolution"}
+               "decision", "resolution",
+               # 2026-08-20, tripwire's first TRUE new token since it was built (the 08-12
+               # maiden hits were both false positives):
+               # `ab`  a bare A/B lever draw (inertguard-draw1/draw2) — the same animal as the
+               #       already-declared `kernel-ab`, minus the kernel qualifier. Real prior on
+               #       a real lever, no `substrate`, so it scores as an ordinary forecast and
+               #       declaring it moves NO count. Not asked-first: unlike hidden-draw/eval,
+               #       nothing here is ambiguous enough to spend arc's attention on.
+               "ab"}
 
 # ── STATUS-ONLY TERMINALS (2026-08-14) ───────────────────────────────────────
 # A third channel, found the hard way: sb26-animfeedback-draw1 was WITHDRAWN UNRUN with zero
