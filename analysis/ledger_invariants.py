@@ -1066,6 +1066,21 @@ def main():
                 print(f"    split by kill_reason — {' · '.join(parts)}")
                 print(f"    only the JUDGEMENT arm answers 'were we right to walk away from bets we"
                       f" rated well?'; DESIGN kills price an arm that could not have run as specified")
+            # THE EMPTY ARM (2026-08-22). The first thing the split reported, on the evening it
+            # was built, was that its own headline question has never been sampled: every stamped
+            # decline is a design/premise/power kill, none is `cost`. Arc said it first, in the
+            # message carrying the stamps — "none of the four is cost; I have not yet declined
+            # anything on judgement, which is itself the finding your split now makes visible."
+            # That matters more than the mean. This face has printed a number since 08-12 under a
+            # caption implying it answers 'were we right to walk away from bets we rated well?',
+            # and the arm that would answer it is empty. A statistic standing in for a question it
+            # has never sampled is the exact illusion this whole layer exists to catch, so the
+            # face now says so instead of leaving the caption to imply otherwise.
+            if grp["design"] and not grp["judgement"]:
+                print(f"    JUDGEMENT ARM EMPTY (n=0): no decline on record was made on"
+                      f" cost-benefit — every stamped one is an arm that could not have run as"
+                      f" specified. The mean above measures DESIGN QUALITY; the question this"
+                      f" face was built to ask has not been sampled yet")
             if grp["unstamped"]:
                 print(f"  CAVEAT: {len(grp['unstamped'])}/{len(withp)} priced declines carry no"
                       f" `kill_reason`, so the mean above POOLS bets declined on judgement with arms"
