@@ -378,7 +378,15 @@ KIND_TOKENS = {"substrate", "pilot", "instrument", "lever", "desk-probe",
                #       a real lever, no `substrate`, so it scores as an ordinary forecast and
                #       declaring it moves NO count. Not asked-first: unlike hidden-draw/eval,
                #       nothing here is ambiguous enough to spend arc's attention on.
-               "ab"}
+               "ab",
+               # 2026-08-22: `desk` — arrived 08-20 and owned 08-21 (13 of that day's 18 lines,
+               # a kind that did not exist 48h earlier). ZERO-GPU work: a measurement or
+               # analysis run at the desk, resolving with `outcome: protocol` or `correction`.
+               # Annotation genus, same rule as the 08-14 six — no `substrate`, so it suppresses
+               # no scoring, and none of the 14 ids carries a prior, so declaring moves NO count.
+               # Recorded because the census is the only place the shift is visible: the day
+               # this kind took over is the day scored resolutions went to zero.
+               "desk"}
 
 # ── STATUS-ONLY TERMINALS (2026-08-14) ───────────────────────────────────────
 # A third channel, found the hard way: sb26-animfeedback-draw1 was WITHDRAWN UNRUN with zero
@@ -998,6 +1006,71 @@ def main():
         out["declined"] = {"ids": dec_ids, "priors": dec_p,
                            "mean_prior": round(sum(withp)/len(withp), 3) if withp else None,
                            "no_prior": miss}
+
+    # ── UNPRICED WALK-AWAY (2026-08-22) ──
+    # The DECLINED face above can only see refusals that CLASSIFY as declined. On 08-21 arc
+    # killed four arms before any GPU — v5-throughput-smoke at the precedent gate, then
+    # thinkbank-calibration / v5-live-persistence / lora-conv-l1-train, their own eleventh
+    # through fourteenth — and not one landed where that face could reach it. Three arrived as
+    # {"outcome": "void", "result": "withdrawn"}: void wins the classification, and void means
+    # COULD NOT MEASURE, not CHOSE NOT TO SPEND. The fourth arrived as a bare `protocol`
+    # annotation. None of the four ever carried a prior, so pair() drops them at the no-prior
+    # guard and calibration never sees them — classed, counted on no face, and invisible to the
+    # single question they are evidence for.
+    #
+    # This face deliberately does NOT re-classify: arc's words keep meaning what arc wrote.
+    # It raises the missing ASK. A walk-away with no prior is uncountable, and the protocol
+    # that fixes it — register-then-refuse, adopted 2026-08-17 — already exists and is already
+    # in use elsewhere in this ledger. Corroboration that the gap is felt on both sides: the
+    # same wave's `outcome-learnability-probe` carries "prior": null, the slot opened and left
+    # empty.
+    #
+    # Base rate measured BEFORE building: 5 such ids out of 159, four of them from one day —
+    # narrow enough that the alert stays credible instead of becoming wallpaper. Vocabulary is
+    # a CLOSED set matched on word prefix and on the FIRST TOKEN of `status`; prose is never
+    # scanned, per the tripwire lesson above. Ids whose disposition rides the event channel are
+    # skipped (untried-draw1, KILLED-BY-ADVERSARY-PREPUSH): those are already read and counted,
+    # and this face is for the ones no channel reaches.
+    WALKAWAY_WORDS = ("withdrawn", "refused", "declined", "killed")
+    RTR_ADOPTED = "2026-08-17"     # register-then-refuse. History can never be re-registered,
+                                   # so older ids print as context and only a LAPSE SINCE
+                                   # ADOPTION alerts — same contract as CHANNEL STAMP.
+
+    def _walk_word(l):
+        for w in (result_field(l), l.get("result"), l.get("outcome"), l.get("resolution")):
+            lw = str(w or "").lower()
+            if lw.startswith(WALKAWAY_WORDS): return lw.split()[0]
+        head = (str(l.get("status") or "").split() or [""])[0].lower().strip(".,;:—-*")
+        return head if head.startswith(WALKAWAY_WORDS) else None
+
+    unpriced = []
+    for pid in dict.fromkeys(l.get("id") for l in lines if l.get("id")):
+        if pid in dec_ids: continue                       # already named by the DECLINED face
+        ls = [l for l in lines if l.get("id") == pid]
+        if any(prior_of(l) is not None for l in ls): continue      # priced -> countable already
+        hits = [(l.get("ts") or "", l) for l in ls if _walk_word(l)]
+        if not hits: continue
+        if any(event_class(l) is not None for _, l in hits): continue
+        ts, l0 = sorted(hits, key=lambda h: h[0])[0]
+        unpriced.append({"id": pid, "ts": ts[:10], "word": _walk_word(l0),
+                         "classed_as": final_cls.get(pid) or "nothing"})
+    if unpriced:
+        unpriced.sort(key=lambda r: (r["ts"], r["id"]))
+        named = ", ".join(f"{r['id']} ({r['word']} -> counted as {r['classed_as']})"
+                          for r in unpriced)
+        print(f"\nUNPRICED WALK-AWAY  {len(unpriced)} walked away from with no prior ever · {named}")
+        fresh = [r for r in unpriced if r["ts"] >= RTR_ADOPTED]
+        out["unpriced_walkaway"] = {"ids": [r["id"] for r in unpriced],
+                                    "since_adoption": [r["id"] for r in fresh]}
+        if fresh:
+            classes = "/".join(sorted({r["classed_as"] for r in fresh}))
+            alerts.append(
+                f"ALERT unpriced-walk-away: {len(fresh)} id(s) killed or withdrawn without ever "
+                f"registering a prior, since register-then-refuse was adopted {RTR_ADOPTED} "
+                f"({', '.join(r['id'] for r in fresh)}) — each one IS classed ({classes}), but a "
+                f"class is not a price: it counts on no face, and the DECLINED question 'were we "
+                f"right to walk away from bets we rated well?' cannot reach it. Register the "
+                f"prereg with the prior you intended and THEN refuse")
 
     # ── SPLIT RESULT (2026-08-16) ──
     # One run, several pre-declared questions, DIFFERENT verdicts. `split` classifies as
