@@ -182,7 +182,19 @@ def is_declined(l):
     happened, so there is no ground truth to grade the stated prior against. Under the
     register-then-refuse protocol these ids DO carry a prior, so without this branch they
     would read in-flight forever."""
-    return any(str(w or "").lower().startswith(("refused", "declined", "premise-refuted"))
+    return any(str(w or "").lower().startswith(("refused", "declined", "premise-refuted", "no-arm"))
+               for w in (l.get("outcome"), l.get("resolution"), result_field(l)))
+
+def is_withdrawn_word(l):
+    """2026-08-22, mirrors ledger_invariants.OUTCOME_DECLARED['withdrawn-at-adversary'].
+    A THIRD carrier for withdrawn-unrun: until now the class arrived only on a bare uppercase
+    `status` (STATUS_HEADS). Arc's 08-21 kill wave put it on `outcome` instead, WITH the prior
+    the arm would have carried — register-then-refuse done right — and because no field on the
+    line was readable all four read IN-FLIGHT: dead arms counted as live bets, in-flight 5 -> 9.
+    Matched on the FULL declared word, not a bare `withdrawn` prefix: the three unpriced kills
+    of the same night carry {"outcome":"void","result":"withdrawn"} and a prefix rule would
+    silently reclassify them out of void, which is arc's call to make, not ours."""
+    return any(str(w or "").lower().startswith("withdrawn-at-adversary")
                for w in (l.get("outcome"), l.get("resolution"), result_field(l)))
 
 def last_disposition(ls):
@@ -200,7 +212,8 @@ def last_disposition(ls):
         elif is_declined(l):                 d = "declined"
         elif is_void(l):                     d = "void"
         elif l.get("outcome") == "relabel":  d = "relabel"
-        elif status_class(l) == "withdrawn": d = "withdrawn"   # registered, never ran
+        elif status_class(l) == "withdrawn" or is_withdrawn_word(l):
+                                             d = "withdrawn"   # registered, never ran
         elif is_split(l):                    d = "split"       # ran, answered several questions
     return d
 
@@ -294,8 +307,10 @@ for pid in order:
                                      # event-form GRAY* head to the word form too, so `gray` and
                                      # `inconclusive` land here rather than reading in-flight
                                      # forever and holding n back with them.
-    elif any(status_class(l) == "withdrawn" for l in lines):
-        withdrawn.append(pid)        # registered, never ran, superseded by a redesign
+    elif any(status_class(l) == "withdrawn" or is_withdrawn_word(l) for l in lines):
+        withdrawn.append(pid)        # registered, never ran, superseded by a redesign — or
+                                     # killed at the adversary gate with its prior stated
+                                     # (2026-08-22 word-form carrier; see is_withdrawn_word)
     elif any(l.get("outcome") == "amended-before-running" for l in outs): amended.append(pid)
     elif any(l.get("status") == "closed" or l.get("outcome") == "closed" for l in lines):
         closed_unscorable.append(pid)  # closed without a whitelisted verdict word

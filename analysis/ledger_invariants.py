@@ -239,6 +239,29 @@ OUTCOME_DECLARED = {
     # at all, since it never registered a prereg. See the SPLIT RESULT face below, which keeps
     # the id named out loud rather than letting a headline result rest quietly in a bucket.
     "split": "unscorable",
+    # 2026-08-22, arc's 08-21 kill wave — NINE arms stopped before GPU in one day.
+    # `withdrawn-at-adversary`  THE GOOD CASE, and it was reading as a bug. Four arms
+    #                (licpred-l2-train 0.40, servelaw-draw1 0.15, actedness-reorder-delivery
+    #                0.45, lora-conv-l2-fidelity-train 0.55) arrived as kind=withdrawn WITH
+    #                the prior the arm would have carried — register-then-refuse executed
+    #                exactly as the 08-17 protocol asks, unprompted. Because the word was
+    #                undeclared, NO field on those lines was readable and all four sat in
+    #                IN-FLIGHT: dead arms counted as live bets (in-flight 5 -> 9). The layer
+    #                was penalising the only four kills that did it right.
+    #                CLASS BANKED CONSERVATIVELY as `withdrawn`, which is arc's own word for
+    #                them — the least interpretive reading available. Our view is that
+    #                `declined` is the truer class (an adversary round that kills an arm IS a
+    #                decision about whether to spend, and the stated prior exists to be
+    #                compared), and the 08-22 brief asks arc to settle it. Moving it later is
+    #                one line here and one in calibration.py; asserting it now would put four
+    #                priors into the DECLINED comparison on our guess about arc's intent.
+    # `no-arm`      patheff-sizing: a desk measurement REFUTED THE PREMISE, so no arm was ever
+    #                registered ("no arm registered"). Same shape as the declared
+    #                `premise-refuted`, so it takes the same class. It carries no prior, which
+    #                is the right consequence: it lands on the DECLINED face and trips that
+    #                face's existing NO-PRIOR warn, naming itself out loud instead of
+    #                vanishing.
+    "withdrawn-at-adversary": "withdrawn", "no-arm": "declined",
     # NOT declared, deliberately: `amends …`. Arc's rule (2026-08-13) is SUPERSEDE — the latest
     # line carrying a declared verdict is the disposition, earlier ones are superseded, and an
     # amendment closes the old bet AT THE AMENDING VERDICT rather than reopening it. So `amends`
@@ -386,7 +409,14 @@ KIND_TOKENS = {"substrate", "pilot", "instrument", "lever", "desk-probe",
                # no scoring, and none of the 14 ids carries a prior, so declaring moves NO count.
                # Recorded because the census is the only place the shift is visible: the day
                # this kind took over is the day scored resolutions went to zero.
-               "desk"}
+               "desk",
+               # 2026-08-22: `withdrawn` — the kind arc stamps on a pre-GPU adversary kill that
+               # states its prior (see OUTCOME_DECLARED["withdrawn-at-adversary"]). Distinct
+               # from the already-declared `withdrawal`, which arc uses for a pre-launch
+               # withdrawal pending re-registration (stage3-eval-r7). No `substrate`, so it
+               # suppresses no scoring — correct: these lines carry a real prior, and where
+               # they land is decided by the outcome word, not the kind.
+               "withdrawn"}
 
 # ── STATUS-ONLY TERMINALS (2026-08-14) ───────────────────────────────────────
 # A third channel, found the hard way: sb26-animfeedback-draw1 was WITHDRAWN UNRUN with zero
@@ -468,7 +498,8 @@ def pair(lines):
         elif any(is_declined(l) for l in ls):
             continue                                   # decided WITHOUT running: terminal, never
                                                        # scoreable, counted on its own DECLINED face
-        elif any(status_class(l) == "withdrawn" for l in ls):
+        elif any(status_class(l) == "withdrawn" or disposition(l)[1] == "withdrawn"
+                 for l in ls):
             continue                                   # WITHDRAWN UNRUN (2026-08-14): registered,
                                                        # never run, replaced by a redesign. Kept
                                                        # SEPARATE from declined on purpose — arc's
