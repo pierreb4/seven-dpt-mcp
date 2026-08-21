@@ -248,20 +248,22 @@ OUTCOME_DECLARED = {
     #                undeclared, NO field on those lines was readable and all four sat in
     #                IN-FLIGHT: dead arms counted as live bets (in-flight 5 -> 9). The layer
     #                was penalising the only four kills that did it right.
-    #                CLASS BANKED CONSERVATIVELY as `withdrawn`, which is arc's own word for
-    #                them — the least interpretive reading available. Our view is that
-    #                `declined` is the truer class (an adversary round that kills an arm IS a
-    #                decision about whether to spend, and the stated prior exists to be
-    #                compared), and the 08-22 brief asks arc to settle it. Moving it later is
-    #                one line here and one in calibration.py; asserting it now would put four
-    #                priors into the DECLINED comparison on our guess about arc's intent.
+    #                CLASS = `declined`, ANSWERED BY ARC 2026-08-22 in reply to the brief:
+    #                "your read is right and mine was the lazier word — I minted it to name the
+    #                MECHANISM (killed at the adversary gate), not to assign a class." The
+    #                existing `withdrawn` class means "registered, never run, REPLACED BY A
+    #                REDESIGN", and none of these was; an adversary verdict is a verdict on
+    #                whether the arm as specified could answer its own question, which is a
+    #                spend decision. Banked conservatively as `withdrawn` for one commit
+    #                (5efffac) rather than guessed at — the asked-first contract, and it cost
+    #                one line to move once arc answered.
     # `no-arm`      patheff-sizing: a desk measurement REFUTED THE PREMISE, so no arm was ever
     #                registered ("no arm registered"). Same shape as the declared
     #                `premise-refuted`, so it takes the same class. It carries no prior, which
     #                is the right consequence: it lands on the DECLINED face and trips that
     #                face's existing NO-PRIOR warn, naming itself out loud instead of
     #                vanishing.
-    "withdrawn-at-adversary": "withdrawn", "no-arm": "declined",
+    "withdrawn-at-adversary": "declined", "no-arm": "declined",
     # NOT declared, deliberately: `amends …`. Arc's rule (2026-08-13) is SUPERSEDE — the latest
     # line carrying a declared verdict is the disposition, earlier ones are superseded, and an
     # amendment closes the old bet AT THE AMENDING VERDICT rather than reopening it. So `amends`
@@ -498,8 +500,7 @@ def pair(lines):
         elif any(is_declined(l) for l in ls):
             continue                                   # decided WITHOUT running: terminal, never
                                                        # scoreable, counted on its own DECLINED face
-        elif any(status_class(l) == "withdrawn" or disposition(l)[1] == "withdrawn"
-                 for l in ls):
+        elif any(status_class(l) == "withdrawn" for l in ls):
             continue                                   # WITHDRAWN UNRUN (2026-08-14): registered,
                                                        # never run, replaced by a redesign. Kept
                                                        # SEPARATE from declined on purpose — arc's
@@ -1024,11 +1025,53 @@ def main():
         named = ", ".join(f"{i} (p={dec_p[i]})" if dec_p[i] is not None else f"{i} (NO PRIOR)"
                           for i in dec_ids)
         print(f"\nDECLINED  {len(dec_ids)} decided without running · {named}")
+
+        # KILL REASON (2026-08-22) — arc's adaptation, offered unprompted in reply to the brief
+        # and adopted the same evening. Their caveat, which is the reason this exists: all four
+        # of the 08-21 adversary kills were stopped on PREMISE or DESIGN faults, never on
+        # cost-benefit judgement. In arc's words, "these are not four good bets I walked away
+        # from; they are four prices I put on broken designs." The conditional those priors
+        # forecast — P(clears | the arm runs AS SPECIFIED) — never obtained, because the arm as
+        # specified was incoherent. That is MORE informative, not less, but it measures DESIGN
+        # QUALITY, and this face's question is BET SELECTION. Pooling them makes the headline
+        # mean answer neither question, which is the failure this whole layer exists to catch.
+        # Read per-id from ANY line, first-wins: the 08-17 stamp lesson — append-only compliance
+        # arrives as a later amendment far more often than on the registration line.
+        KILL_REASONS = {"premise": "design", "power": "design",
+                        "already-answered": "design", "cost": "judgement"}
+        kr = {}
+        for i in dec_ids:
+            v = [str(l.get("kill_reason")).strip().lower() for l in lines
+                 if l.get("id") == i and l.get("kill_reason")]
+            if v: kr[i] = v[0]
+        bad_kr = sorted({v for v in kr.values() if v not in KILL_REASONS})
+        if bad_kr:
+            alerts.append(f"ALERT kill-reason-dialect: {', '.join(bad_kr)} is not declared "
+                          f"vocabulary (premise/power/already-answered/cost) — the DECLINED split "
+                          f"cannot place it, so it falls in with the unstamped. Declare it or "
+                          f"restate the line")
+
         withp = [p for p in dec_p.values() if p is not None]
         ranp  = [float(prior_of(r["pre"])) for r in resolved if prior_of(r.get("pre") or {}) is not None]
         if withp and ranp:
             print(f"  mean prior — declined {sum(withp)/len(withp):.2f} vs run {sum(ranp)/len(ranp):.2f}"
                   f" (n {len(withp)}/{len(ranp)}): declining ABOVE the run mean is the shape worth explaining")
+            grp = {"judgement": [], "design": [], "unstamped": []}
+            for i in dec_ids:
+                if dec_p[i] is None: continue
+                grp[KILL_REASONS.get(kr.get(i, ""), "unstamped")].append(float(dec_p[i]))
+            if grp["judgement"] or grp["design"]:
+                parts = [f"{g} {sum(v)/len(v):.2f} (n {len(v)})"
+                         for g, v in grp.items() if v]
+                print(f"    split by kill_reason — {' · '.join(parts)}")
+                print(f"    only the JUDGEMENT arm answers 'were we right to walk away from bets we"
+                      f" rated well?'; DESIGN kills price an arm that could not have run as specified")
+            if grp["unstamped"]:
+                print(f"  CAVEAT: {len(grp['unstamped'])}/{len(withp)} priced declines carry no"
+                      f" `kill_reason`, so the mean above POOLS bets declined on judgement with arms"
+                      f" killed as incoherent — two different questions. Stamp"
+                      f" premise/power/already-answered/cost (any later line; read per-id, first-wins)"
+                      f" and this caveat clears itself")
         miss = [i for i in dec_ids if dec_p[i] is None]
         if miss:
             print(f"  WARN: no prior on {', '.join(miss)} — per the register-then-refuse protocol,"
@@ -1036,7 +1079,9 @@ def main():
                   f" decline is counted but 'were we right to decline?' stays unanswerable")
         out["declined"] = {"ids": dec_ids, "priors": dec_p,
                            "mean_prior": round(sum(withp)/len(withp), 3) if withp else None,
-                           "no_prior": miss}
+                           "no_prior": miss, "kill_reason": kr,
+                           "unstamped_kill_reason": [i for i in dec_ids
+                                                     if dec_p[i] is not None and i not in kr]}
 
     # ── UNPRICED WALK-AWAY (2026-08-22) ──
     # The DECLINED face above can only see refusals that CLASSIFY as declined. On 08-21 arc
