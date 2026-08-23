@@ -1207,10 +1207,22 @@ def main():
         return outp
 
     cites = []                                           # (ts, id, path, verdict, bad)
-    for l in lines:
+    unparsed = []                                        # stamp present, nothing read = the
+    for l in lines:                                      # face's own zero-denominator case
         if not l.get("id"): continue
-        for path, verdict, bad in _instruments(l):
+        if not l.get("instrument"): continue
+        got = _instruments(l)
+        if not got: unparsed.append((l["id"], str(l["instrument"])[:80])); continue
+        for path, verdict, bad in got:
             cites.append((l.get("ts") or "", l["id"], path, verdict, bad))
+    if unparsed:
+        # 2026-08-23: the flat `;` split dropped arc's re-certification stamp SILENTLY and the
+        # face kept showing a stale VACUOUS — no alert, because nothing was examined. Arc named
+        # it: silent-drop-on-parse is the audit layer's vacuous check. A stamp that parses to
+        # nothing is now a reported event, never a quiet absence.
+        alerts.append("ALERT instrument-unparsed: " + "; ".join(f"'{i}' carries an `instrument` "
+                      f"stamp this parser read NOTHING from ({v!r})" for i, v in unparsed)
+                      + " — the face below is silent about these ids, not clear on them")
     if cites:
         cites.sort(key=lambda c: c[0])
         latest = {}                                      # path -> (ts, id, verdict, bad)
