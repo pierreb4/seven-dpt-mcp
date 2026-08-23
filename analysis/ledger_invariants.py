@@ -1183,7 +1183,18 @@ def main():
         raw = l.get("instrument")
         if not raw: return []
         if isinstance(raw, list): parts = [str(x) for x in raw]
-        else: parts = [x for x in re.split(r"\s*;\s*", str(raw)) if x.strip()]
+        else:
+            # Split on `;` at paren depth 0 ONLY. Arc's 08-23 amendment carried
+            # "(... 14/14 clean-and-fire; re-run on this arm's own corpus ...)" and a flat
+            # split dropped the whole repaired-instrument stamp without a sound.
+            parts, buf, depth = [], "", 0
+            for ch in str(raw):
+                if ch == "(": depth += 1
+                elif ch == ")": depth = max(0, depth - 1)
+                if ch == ";" and depth == 0: parts.append(buf); buf = ""
+                else: buf += ch
+            parts.append(buf)
+            parts = [x for x in parts if x.strip()]
         outp = []
         for x in parts:
             m = re.match(r"\s*([^\s(]+)\s*(?:\((.*)\))?\s*$", x.strip())
