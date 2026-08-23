@@ -523,7 +523,14 @@ if "--json" in sys.argv:
                        "event_nonscored": event_nonscored, "amended": amended,
                        "closed_unscorable": closed_unscorable, "withdrawn": withdrawn,
                        "split_unscorable": split_unscorable},
-           "last_resolved_ts": resolved[-1]["ts"]}
+           "last_resolved_ts": resolved[-1]["ts"],
+           # 2026-08-23: `instrument` stamp (asked 08-22, arc adopted same night). This layer
+           # does not READ the field — an instrument verdict never moves a bucket or a score —
+           # it only persists which ids carry one, so self_check can hold ledger_invariants'
+           # INSTRUMENT face (the layer that parses the `path (verdict); path` shape) to the
+           # same citing set. Independent walk, same ledger, same discipline as `buckets`.
+           "instrument_cited": sorted(pid for pid, ls in by_id.items()
+                                      if any(l.get("instrument") for l in ls))}
     if era_out: out["split"] = era_out
     os.makedirs(os.path.dirname(OUTJSON), exist_ok=True)
     json.dump(out, open(OUTJSON, "w"), indent=2)

@@ -1163,6 +1163,79 @@ def main():
                 f"right to walk away from bets we rated well?' cannot reach it. Register the "
                 f"prereg with the prior you intended and THEN refuse")
 
+    # ── INSTRUMENT (2026-08-23) ──
+    # Asked 08-22 (the ledger records decision + prior but never WHICH INSTRUMENT certified the
+    # decision, so a retracted instrument had no path back to the decisions resting on it);
+    # arc adopted it the same night, on the registration line, unprompted. Their shape is NOT a
+    # bare name: a `;`-separated list of paths, each with an optional parenthetical VERDICT —
+    #   "duck/invariants.py (insufficient — reads no prompt content); duck/layers_regression.py (new, all 12 layers)"
+    # and in the first three stamps the instrument minted to close the case was indicted twice
+    # in five hours (new -> UNSOUND -> VACUOUS). So, unlike kill_reason, the read is LATEST-WINS
+    # per instrument: a later verdict supersedes. Per-id, any line (amendments carry `id`).
+    # The face answers one question: which decisions cited an instrument AS SOUND that a later
+    # line retracted? Self-indicting citations ("X (UNSOUND ...)") are the decision KNOWING, and
+    # never alert. Closed verdict vocabulary; anything else is printed verbatim as unclassified
+    # and left alone — declared vocabulary drives alerting, never per-id disposition.
+    INSTR_BAD = ("unsound", "vacuous", "retired", "insufficient", "retracted", "broken",
+                 "wrong-unit", "cannot-fail")
+
+    def _instruments(l):
+        raw = l.get("instrument")
+        if not raw: return []
+        if isinstance(raw, list): parts = [str(x) for x in raw]
+        else: parts = [x for x in re.split(r"\s*;\s*", str(raw)) if x.strip()]
+        outp = []
+        for x in parts:
+            m = re.match(r"\s*([^\s(]+)\s*(?:\((.*)\))?\s*$", x.strip())
+            if not m: continue
+            path, verdict = m.group(1), (m.group(2) or "").strip()
+            # Bad word ANYWHERE in the verdict, not the head: arc's third stamp reads
+            # "result-coherence VACUOUS after the layer-16 fix" — the head is the check's name.
+            words = {w.lower().strip(".,;:—-()") for w in verdict.split()}
+            outp.append((path, verdict, any(w.startswith(INSTR_BAD) for w in words)))
+        return outp
+
+    cites = []                                           # (ts, id, path, verdict, bad)
+    for l in lines:
+        if not l.get("id"): continue
+        for path, verdict, bad in _instruments(l):
+            cites.append((l.get("ts") or "", l["id"], path, verdict, bad))
+    if cites:
+        cites.sort(key=lambda c: c[0])
+        latest = {}                                      # path -> (ts, id, verdict, bad)
+        # A bare citation ("duck/invariants.py", no parenthetical) is a USE, not a verdict: it
+        # must not wash an earlier "(insufficient ...)" back to sound. Only verdict-bearing
+        # citations move the latest state.
+        for ts, i, path, verdict, bad in cites:
+            if verdict or path not in latest: latest[path] = (ts, i, verdict, bad)
+        by_path = {}
+        for ts, i, path, verdict, bad in cites: by_path.setdefault(path, []).append(i)
+        print(f"\nINSTRUMENT  {len(cites)} citation(s) · {len(latest)} instrument(s) stamped"
+              f" · ids citing: {len({c[1] for c in cites})}/{len(dec_ids)} declined")
+        rests_on_retracted = []
+        for path, (ts, i, verdict, bad) in sorted(latest.items()):
+            state = "RETRACTED" if bad else "sound"
+            print(f"  {path:<28} latest {state:<9} {ts[:10]} @ {i}"
+                  + (f"  ({verdict})" if verdict else "")
+                  + f" · cited by {len(dict.fromkeys(by_path[path]))}")
+            if not bad: continue
+            for cts, ci, cpath, cverdict, cbad in cites:
+                if cpath != path or cbad or cts >= ts or not cverdict: continue   # bare = use, not certification
+                rests_on_retracted.append((ci, path, cts[:10], verdict))
+        if rests_on_retracted:
+            print(f"  RESTS ON A RETRACTED INSTRUMENT: "
+                  + " · ".join(f"{ci} cited {path} as sound on {cts}" for ci, path, cts, _ in rests_on_retracted))
+            alerts.append(
+                "ALERT instrument-retracted: "
+                + "; ".join(f"'{ci}' cited {path} as sound ({cts}) and a later line retracted it "
+                            f"({v})" for ci, path, cts, v in rests_on_retracted)
+                + " — the decision was certified by an instrument that no longer stands; "
+                  "re-derive it or stamp the id with the instrument that now certifies it")
+        out["instrument"] = {"latest": {p: {"ts": v[0], "id": v[1], "verdict": v[2], "retracted": v[3]}
+                                        for p, v in latest.items()},
+                             "rests_on_retracted": [{"id": a, "instrument": b, "cited": c}
+                                                    for a, b, c, _ in rests_on_retracted]}
+
     # ── SPLIT RESULT (2026-08-16) ──
     # One run, several pre-declared questions, DIFFERENT verdicts. `split` classifies as
     # unscorable so nothing is booked against a prior that does not exist — but a bucket is

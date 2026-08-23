@@ -67,6 +67,14 @@ cal_declined = set(buckets.get("declined") or [])
 #     classify differently is a defect in one of them, always. This is the 08-12 defect.
 check("cross-layer: declined sets agree", inv_declined == cal_declined,
       f"invariants {sorted(inv_declined)} vs calibration {sorted(cal_declined)}")
+inv_instr = set()
+for v in ((inv.get("instrument") or {}).get("latest") or {}).values(): inv_instr.add(v.get("id"))
+inv_instr |= {r.get("id") for r in (inv.get("instrument") or {}).get("rests_on_retracted") or []}
+cal_instr = set(cal.get("instrument_cited") or [])
+# invariants persists latest-per-instrument + the retracted-rest set, never every citation, so the
+# claim is containment: every id invariants names as citing an instrument IS stamped per calibration.
+check("cross-layer: instrument-citing ids are stamped", inv_instr <= cal_instr,
+      f"invariants names {sorted(inv_instr - cal_instr)} that calibration sees no stamp on")
 check("cross-layer: in-flight sets agree", inv_inflight == cal_inflight,
       f"only-invariants {sorted(inv_inflight - cal_inflight)}"
       f" · only-calibration {sorted(cal_inflight - inv_inflight)}")
