@@ -418,7 +418,11 @@ KIND_TOKENS = {"substrate", "pilot", "instrument", "lever", "desk-probe",
                # withdrawal pending re-registration (stage3-eval-r7). No `substrate`, so it
                # suppresses no scoring — correct: these lines carry a real prior, and where
                # they land is decided by the outcome word, not the kind.
-               "withdrawn"}
+               "withdrawn",
+               # 2026-08-24: `correction` as a KIND (was only an outcome word, bookkeeping
+               # class). First use corrects a same-id amendment (opt_steps=0, not ~8) —
+               # annotation, no counts move.
+               "correction"}
 
 # ── STATUS-ONLY TERMINALS (2026-08-14) ───────────────────────────────────────
 # A third channel, found the hard way: sb26-animfeedback-draw1 was WITHDRAWN UNRUN with zero
@@ -1197,9 +1201,18 @@ def main():
             parts = [x for x in parts if x.strip()]
         outp = []
         for x in parts:
-            m = re.match(r"\s*([^\s(]+)\s*(?:\((.*)\))?\s*$", x.strip())
-            if not m: continue
-            path, verdict = m.group(1), (m.group(2) or "").strip()
+            # 2026-08-24: names are FREE TEXT, not paths. The guard's first live firing (one
+            # day after it was built) caught "k11 first-run log (gates PASS, training OOM)",
+            # "stage_v5_live serving stack (proven)", "[trace] memory instrument" — all dropped
+            # by a space-free-token rule. Name = everything before the FINAL parenthetical,
+            # trimmed; every previously-parsing stamp reads identically.
+            m = re.match(r"\s*(.+?)\s*(?:\(([^()]*(?:\([^()]*\)[^()]*)*)\))?\s*$", x.strip())
+            if not m or not m.group(1): continue
+            path, verdict = m.group(1).strip(), (m.group(2) or "").strip()
+            # A name that OPENS a parenthetical it never closes is a malformed stamp, not an
+            # instrument — without this the widened regex would swallow it silently and the
+            # unparsed guard (built for exactly that silence) would never fire again.
+            if path.count("(") != path.count(")"): continue
             # Bad word ANYWHERE in the verdict, not the head: arc's third stamp reads
             # "result-coherence VACUOUS after the layer-16 fix" — the head is the check's name.
             words = {w.lower().strip(".,;:—-()") for w in verdict.split()}
