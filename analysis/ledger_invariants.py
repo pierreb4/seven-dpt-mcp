@@ -46,7 +46,7 @@ Reads the same two-line JSONL ledger as calibration.py (pre-registration lines c
                 FAILED-BY-BARS was the first scoreable event-terminal). {"event":"resolution",
                 "status":..} is the verdict channel — heads FAILED*/CLEARED* score, VOID*/
                 *PREPUSH* read void, GRAY*/SUBSTRATE-* are terminal-non-scored (power
-                statement / feasibility answer), kind="substrate" preregs never score.
+                statement / feasibility answer), kind="substrate" preregs never scored BEFORE 2026-08-24; arc's 15:10Z classification annotation makes a PRICED substrate resolution score from that day (the prior is a real forecast of the arm's own clauses; unpriced substrate stays the non-scored class).
                 Non-resolution events are bookkeeping (ignored) except *KILLED*/*PREPUSH*
                 event values (void). The tripwire remains armed for the NEXT drift: a
                 resolution status no head rule maps ALERTs — extend event_class in BOTH
@@ -422,7 +422,12 @@ KIND_TOKENS = {"substrate", "pilot", "instrument", "lever", "desk-probe",
                # 2026-08-24: `correction` as a KIND (was only an outcome word, bookkeeping
                # class). First use corrects a same-id amendment (opt_steps=0, not ~8) —
                # annotation, no counts move.
-               "correction"}
+               "correction",
+               # 2026-08-24: `annotation` — arc's 15:10Z classification line (the one that SET
+               # the substrate-scores rule) arrived on a kind the vocabulary had never seen.
+               # Annotation genus: carries no prior, no verdict word; no `substrate`, so it
+               # suppresses nothing.
+               "annotation"}
 
 # ── STATUS-ONLY TERMINALS (2026-08-14) ───────────────────────────────────────
 # A third channel, found the hard way: sb26-animfeedback-draw1 was WITHDRAWN UNRUN with zero
@@ -931,7 +936,7 @@ def main():
 
     # ── EVENT-DIALECT TRIPWIRE (v3.1 ABSORBED 2026-08-11; the alert now guards the NEXT drift) ──
     # event:"resolution" is the verdict channel and event_class maps its status heads;
-    # kind=substrate preregs never score; other event types are bookkeeping. A resolution
+    # kind=substrate preregs never scored before 2026-08-24 (priced substrate resolutions score since arc's 15:10Z rule); other event types are bookkeeping. A resolution
     # status no rule maps is the moment the dialect has drifted again — a scoreable
     # terminal the parsers cannot see would silently stick calibration n and starve the
     # #34/#41 wake greps. ALERT and extend event_class in BOTH parsers before trusting n.
@@ -954,7 +959,7 @@ def main():
               + (f" · other events: {others}" if others else "")
               + (f" · UNKNOWN STATUS: {len(ev_unknown)}" if ev_unknown else " · all mapped"))
     for i, s in ev_unknown:
-        alerts.append(f"ALERT event-dialect: '{i}' resolved event-style with status '{s}' — no head rule maps it (FAILED*/CLEARED*/VOID*/GRAY*/SUBSTRATE-*/*PREPUSH*; kind=substrate never scores): the id reads in-flight, calibration n sticks, and the #34/#41 wake patterns may miss it. Extend event_class in calibration.py + ledger_invariants.py and re-check the wake patterns before trusting n")
+        alerts.append(f"ALERT event-dialect: '{i}' resolved event-style with status '{s}' — no head rule maps it (FAILED*/CLEARED*/VOID*/GRAY*/SUBSTRATE-*/*PREPUSH*; kind=substrate non-scored only pre-2026-08-24): the id reads in-flight, calibration n sticks, and the #34/#41 wake patterns may miss it. Extend event_class in calibration.py + ledger_invariants.py and re-check the wake patterns before trusting n")
     out["event_dialect"] = {"n": ev_types.get("resolution", 0), "classes": ev_classes,
                             "types": ev_types, "unknown": [i for i, _ in ev_unknown]}
 

@@ -214,6 +214,8 @@ def last_disposition(ls):
 def kind_tokens(l):
     return {t for t in re.split(r"[+/,;\s]+", str(l.get("kind") or "").lower()) if t}
 
+SUBSTRATE_SCORES_SINCE = "2026-08-24"   # arc's classification annotation, 2026-08-24T15:10Z
+
 def is_substrate(l):
     """Mirrors ledger_invariants.py. `kind` is TOKENISED, not compared whole: a compound
     value (`substrate+pilot`, 2026-08-12) must still hit the substrate rule, or a
@@ -285,8 +287,25 @@ for pid in order:
     prior = priors[-1]
     if verdicts and verdicts[-1].get("outcome") == "relabel":
         relabeled.append(pid)
-    elif terminals and substrate:
+    elif terminals and substrate and (terminals[-1].get("ts") or "") < SUBSTRATE_SCORES_SINCE:
         event_nonscored.append(pid)  # measurement draw: a scoreable word still never scores
+        # ^ ...BEFORE 2026-08-24 only. Arc's 15:10Z classification annotation (lora-conv-
+        # l3o-train, instrument: prior-calibration-protocol) sets the standing rule: a
+        # substrate arm's prior is a REAL FORECAST of its own clauses clearing and SCORES on
+        # resolution — `substrate` says what the bet is ABOUT (the rig, not the lever), never
+        # whether it counts; the genuinely non-scored class is an UNPRICED substrate
+        # registration. Gated on the RESOLUTION date so the rule reads forward: the seven
+        # substrate terminals resolved before 08-24 were settled non-scored under the old
+        # mapping (colab-mtp genus 08-11, v32b substrate-terminal 08-18) and history is not
+        # rewritten; l3o-train (resolved 08-24T11:30, the arm the annotation names) scores at
+        # its last pre-resolution price, 0.55. No id literals — the day boundary implements
+        # the named instruction, and every future priced substrate resolution scores by rule.
+        # Arc CONFIRMED prospective-only (08-24) with the reason that makes it a law, not a
+        # preference: extending the rule backward would be an OUTCOME-CONTAMINATED choice —
+        # all seven results are known, so retroactivity would move the curve by up to 7
+        # points in a direction the forecaster can already compute (peek-then-add-samples),
+        # and the older priors' intent (true P(clears) vs loose confidence tag) can no
+        # longer be certified. A calibration curve must never let its subject do that.
     elif terminals:
         if len(terminals) > 1: multi_terminal.append(pid)
         if any(is_void(l) for l in outs): void_then_adjudicated.append(pid)
