@@ -909,6 +909,33 @@ def main():
             # was a LITERAL "0 positives" in the string, which is why it could go stale at all.
             if fam_stat[fam]["pos"] > 0: continue
             if any(r["id"] == s["id"] for r in inflight):
+                # ── CONTINUE REASON (2026-08-26) ── The alert has always demanded "state the
+                # continue reason on the ledger" — and until today had NO path to hear one: the
+                # check promised a second verdict it could not report (the same class we audit
+                # arc's instruments for). Arc filed one (self-live-persistence 11:30Z, citing
+                # this face as its instrument) and the alert kept firing. Read rule, same head
+                # discipline as STATUS_HEADS: a line for this id whose note BEGINS with the
+                # uppercase head "CONTINUE REASON" states it. Presence check only — the face
+                # never parses the prose. Downgrades to an informational line (never silent:
+                # the family is still 0-positive and the reader should see the bet is justified,
+                # not normal); "STOP RULE" anywhere in that same note is recorded to the JSON so
+                # a later check can hold the author to it if the family re-enters after another
+                # negative. Prose heads, not a field, because the reason IS prose — there is no
+                # closed vocabulary of justifications, and presence-of-head is the only thing
+                # the layer can verify without inventing semantics.
+                creason = next((l for l in lines if l.get("id") == s["id"]
+                                and str(l.get("note", "")).startswith("CONTINUE REASON")), None)
+                if creason:
+                    st = fam_stat[fam]
+                    has_stop = "STOP RULE" in str(creason.get("note", ""))
+                    print(f"  continue-reason stated: '{s['id']}' rides in 0-positive family"
+                          f" '{fam}' ({st['attempts']} attempts) justified on-ledger"
+                          f" {str(creason.get('ts',''))[:10]}"
+                          + (" · stop rule stated" if has_stop else " · NO stop rule"))
+                    out.setdefault("family_mix_continue", []).append(
+                        {"id": s["id"], "family": fam, "ts": creason.get("ts"),
+                         "stop_rule_stated": has_stop})
+                    continue
                 st, shape = fam_stat[fam], fam_shape(fam_stat[fam])
                 head = (f"ALERT family-mix: in-flight '{s['id']}' sits in family '{fam}' with"
                         f" {st['attempts']} attempts/{len(st['alevers'])} levers/{st['pos']} positives")
