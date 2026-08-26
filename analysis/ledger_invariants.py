@@ -898,6 +898,46 @@ def main():
         elif fm_rmiss:
             print(f"  WARN: adoption lapsed — {len(fm_rmiss)} prereg(s) since {fm_since[:10]} carry no"
                   f" `family`: {', '.join(i for i in fm_rmiss if i)}")
+        # ── CONTINUE REASON / STOP RULE (2026-08-26, trip persistence same day) ── The alert
+        # has always demanded "state the continue reason on the ledger" — and until today had
+        # NO path to hear one: the check promised a second verdict it could not report (the
+        # same class we audit arc's instruments for). Read rule, same head discipline as
+        # STATUS_HEADS: a line for the id whose note BEGINS with the uppercase head
+        # "CONTINUE REASON" states it; "STOP RULE" anywhere in that note states a falsifier.
+        # Presence checks only — the face never parses the prose. Records are computed for ALL
+        # continue-reason lines regardless of in-flight status, because the first cut emitted
+        # the record only while the stating arm was in flight — so the stop rule VANISHED from
+        # the JSON at the exact moment it tripped (self-live-persistence resolved failed and
+        # family_mix_continue read None). A stop rule TRIPS when its stating id resolves with
+        # any verdict other than cleared; the trip is a standing fact of the family, printed
+        # every sweep, and any LATER in-flight arm in that family gets the sharpened alert —
+        # clearable by the same CONTINUE REASON mechanism, whose text is on the author to make
+        # answer the tripped rule (the layer cannot verify a "changed recipe class"; it can
+        # make the commitment un-forgettable, which is all it ever does).
+        _res_by_id = {r["id"]: r for r in resolved}
+        continue_recs = []
+        for l in lines:
+            if not str(l.get("note", "")).startswith("CONTINUE REASON"): continue
+            cid = l.get("id")
+            cfam = next((s["family"] for s in stream if s["id"] == cid), "?")
+            has_stop = "STOP RULE" in str(l.get("note", ""))
+            rec = {"id": cid, "family": cfam, "ts": l.get("ts"),
+                   "stop_rule_stated": has_stop, "tripped": False}
+            r = _res_by_id.get(cid)
+            if r is not None:
+                rec["resolved"] = verdict_of(r["res"])
+                rec["tripped"] = bool(has_stop and rec["resolved"]
+                                      and rec["resolved"] != "cleared")
+            continue_recs.append(rec)
+        out["family_mix_continue"] = continue_recs
+        tripped_fams = {c["family"] for c in continue_recs
+                        if c["tripped"] and c["family"] != "?"}
+        out["family_mix_stop_ruled"] = sorted(tripped_fams)
+        for tf in sorted(tripped_fams):
+            trip = next(c for c in continue_recs if c["family"] == tf and c["tripped"])
+            print(f"  STOP RULE TRIPPED: family '{tf}' — '{trip['id']}' stated a stop rule and"
+                  f" resolved {trip['resolved']}; any further in-flight arm here alerts until"
+                  f" its own continue-reason answers the rule")
         for s in stream:
             fam = s["family"]
             if fam == "?" or not fam_stat[fam]["flagged"]: continue
@@ -909,32 +949,24 @@ def main():
             # was a LITERAL "0 positives" in the string, which is why it could go stale at all.
             if fam_stat[fam]["pos"] > 0: continue
             if any(r["id"] == s["id"] for r in inflight):
-                # ── CONTINUE REASON (2026-08-26) ── The alert has always demanded "state the
-                # continue reason on the ledger" — and until today had NO path to hear one: the
-                # check promised a second verdict it could not report (the same class we audit
-                # arc's instruments for). Arc filed one (self-live-persistence 11:30Z, citing
-                # this face as its instrument) and the alert kept firing. Read rule, same head
-                # discipline as STATUS_HEADS: a line for this id whose note BEGINS with the
-                # uppercase head "CONTINUE REASON" states it. Presence check only — the face
-                # never parses the prose. Downgrades to an informational line (never silent:
-                # the family is still 0-positive and the reader should see the bet is justified,
-                # not normal); "STOP RULE" anywhere in that same note is recorded to the JSON so
-                # a later check can hold the author to it if the family re-enters after another
-                # negative. Prose heads, not a field, because the reason IS prose — there is no
-                # closed vocabulary of justifications, and presence-of-head is the only thing
-                # the layer can verify without inventing semantics.
-                creason = next((l for l in lines if l.get("id") == s["id"]
-                                and str(l.get("note", "")).startswith("CONTINUE REASON")), None)
+                creason = next((c for c in continue_recs if c["id"] == s["id"]), None)
                 if creason:
                     st = fam_stat[fam]
-                    has_stop = "STOP RULE" in str(creason.get("note", ""))
                     print(f"  continue-reason stated: '{s['id']}' rides in 0-positive family"
                           f" '{fam}' ({st['attempts']} attempts) justified on-ledger"
-                          f" {str(creason.get('ts',''))[:10]}"
-                          + (" · stop rule stated" if has_stop else " · NO stop rule"))
-                    out.setdefault("family_mix_continue", []).append(
-                        {"id": s["id"], "family": fam, "ts": creason.get("ts"),
-                         "stop_rule_stated": has_stop})
+                          f" {str(creason.get('ts') or '')[:10]}"
+                          + (" · stop rule stated" if creason["stop_rule_stated"]
+                             else " · NO stop rule")
+                          + (" · AFTER a tripped stop rule — the reason must answer it"
+                             if fam in tripped_fams else ""))
+                    continue
+                if fam in tripped_fams:
+                    trip = next(c for c in continue_recs if c["family"] == fam and c["tripped"])
+                    alerts.append(
+                        f"ALERT stop-rule: '{s['id']}' is in flight in family '{fam}' whose"
+                        f" stop rule TRIPPED ('{trip['id']}' resolved {trip['resolved']} after"
+                        f" committing to no further arm without a changed recipe class) — close"
+                        f" it, or state the CONTINUE REASON that answers the tripped rule")
                     continue
                 st, shape = fam_stat[fam], fam_shape(fam_stat[fam])
                 head = (f"ALERT family-mix: in-flight '{s['id']}' sits in family '{fam}' with"
