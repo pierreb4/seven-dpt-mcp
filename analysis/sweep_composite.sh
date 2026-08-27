@@ -53,6 +53,15 @@ if [ "${SOURCES_SKIP:-0}" != 1 ]; then
   python3 "$HERE/sources_diff.py" || true
 fi
 
+# Memory-index guard (2026-08-28, spark #52): the session-loaded MEMORY.md must stay an
+# index of one-line HOOKS, never content — it re-drifted once into a 13k-char dump line.
+# Structural, not advisory (problem #6's lesson). Print-only: rc never consulted, and the
+# guard is silent when the file is absent (other machines / other users).
+MEMFILE="${MEMORY_INDEX:-$HOME/.claude/projects/-home-pierre-projects-seven-dpt-mcp/memory/MEMORY.md}"
+if [ -f "$MEMFILE" ]; then
+  awk -v max=300 'length($0) > max { printf "  MEMORY-INDEX GUARD: line %d is %d chars (>%d) — trim to a hook, move content to the memory file [%s...]\n", NR, length($0), max, substr($0, 1, 60) }' "$MEMFILE" || true
+fi
+
 # A contradiction BETWEEN faces outranks any alert FROM a face: if the layers disagree about
 # what happened, no number in this sweep has been established yet. rc=2 says so distinctly.
 if [ "$SC_RC" -ne 0 ]; then exit "$SC_RC"; fi
