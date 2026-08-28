@@ -427,7 +427,14 @@ KIND_TOKENS = {"substrate", "pilot", "instrument", "lever", "desk-probe",
                # the substrate-scores rule) arrived on a kind the vocabulary had never seen.
                # Annotation genus: carries no prior, no verdict word; no `substrate`, so it
                # suppresses nothing.
-               "annotation"}
+               "annotation",
+               # 2026-08-28: `submission` — the kind on a HIDDEN-RERUN submission draw
+               # (q38-hidden-draw-1, prior 0.6, family 'hidden draw (9.137 instrument)').
+               # Same animal as `hidden-draw`: a scored forecast about a measurement
+               # quantity on the hidden set; a below-band outcome scores the FORECAST
+               # wrong without killing any lever. It scored failed at 0.6 exactly as an
+               # ordinary forecast should — no `substrate`, declaring moves NO count.
+               "submission"}
 
 # ── STATUS-ONLY TERMINALS (2026-08-14) ───────────────────────────────────────
 # A third channel, found the hard way: sb26-animfeedback-draw1 was WITHDRAWN UNRUN with zero
