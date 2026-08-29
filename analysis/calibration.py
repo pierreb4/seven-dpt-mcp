@@ -215,6 +215,14 @@ def kind_tokens(l):
     return {t for t in re.split(r"[+/,;\s]+", str(l.get("kind") or "").lower()) if t}
 
 SUBSTRATE_SCORES_SINCE = "2026-08-24"   # arc's classification annotation, 2026-08-24T15:10Z
+# ts caveat (dialect-3, 7c64878, 2026-08-29): `ts` is a HAND-STAMPED NOMINAL event time with
+# a proven day-typo class — authority order is file append order, then git-blame arrival,
+# then ts as label only. This gate reads ts and is the ONE load-bearing consumer: a boundary
+# id (resolution ts within a typo's reach of 2026-08-24) must be resolved by git-blame
+# arrival before trusting the comparison below. Every substrate terminal to date sits days
+# clear of the boundary; the invariants ts-disorder tripwire surfaces any new typo, so a
+# silent flip requires a typo the tripwire missed AND a boundary-adjacent arm — check blame
+# by hand if both ever coincide.
 
 def is_substrate(l):
     """Mirrors ledger_invariants.py. `kind` is TOKENISED, not compared whole: a compound

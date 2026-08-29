@@ -924,10 +924,17 @@ def main():
         _res_by_id = {r["id"]: r for r in resolved}
         continue_recs = []
         for l in lines:
-            if not str(l.get("note", "")).startswith("CONTINUE REASON"): continue
+            # 2026-08-29: hear the head in `why` too, not only `note`. The v3 prereg dialect
+            # carries a registration's rationale in `why`, and opsdv2-live-rider answered the
+            # tripped behavioural-rider rule there — the alert kept demanding a CONTINUE
+            # REASON that was already on the ledger. Same class as the 08-26 FAMILY MIX fix
+            # (an alert promising a verdict it had no path to hear), one field over.
+            crtxt = next((str(l.get(f)) for f in ("note", "why")
+                          if str(l.get(f, "")).startswith("CONTINUE REASON")), None)
+            if crtxt is None: continue
             cid = l.get("id")
             cfam = next((s["family"] for s in stream if s["id"] == cid), "?")
-            has_stop = "STOP RULE" in str(l.get("note", ""))
+            has_stop = "STOP RULE" in crtxt
             rec = {"id": cid, "family": cfam, "ts": l.get("ts"),
                    "stop_rule_stated": has_stop, "tripped": False}
             r = _res_by_id.get(cid)
@@ -1238,6 +1245,90 @@ def main():
                 f"right to walk away from bets we rated well?' cannot reach it. Register the "
                 f"prereg with the prior you intended and THEN refuse")
 
+    # ── UNPRICED MEASUREMENT DRAW (2026-08-29, ship38p1-hidden-draw) ──
+    # The `submission` absorption (2026-08-28, q38-hidden-draw-1) classed measurement draws as
+    # SCORED FORECASTS about a hidden quantity — q38 registered 0.6 before its draw and scored
+    # failed like any forecast. A draw with NO prior anywhere breaks that genus: it counts on
+    # no face, and a pre-stated band frame, however honest, cannot enter the Brier curve.
+    # Pricing after the fact is outcome-contaminated (arc's own 08-24 peek prohibition), so a
+    # tripped specimen is unscoreable forever; the alert exists for the NEXT draw.
+    # An id NAMED in a kind-dialect-semantics line is an ACKNOWLEDGED specimen: the
+    # declaration vehicle (arc's ask-first channel — e21349b, c1069e7, dialect-3 7c64878)
+    # has ruled on it, so it prints as a standing fact; the ALERT form is reserved for
+    # specimens the dialect has not seen. Presence check only (id string in the note),
+    # the same discipline as the head reads.
+    _dialect_notes = " ".join(str(l.get("note", "")) for l in lines
+                              if str(l.get("id", "")).startswith("kind-dialect-semantics"))
+    DRAW_KINDS = {"submission", "hidden-draw"}
+    updraws = []
+    for pid in dict.fromkeys(l.get("id") for l in lines if l.get("id")):
+        if pid in dec_ids: continue
+        ls = [l for l in lines if l.get("id") == pid]
+        if not any(kind_tokens(l) & DRAW_KINDS for l in ls): continue
+        if any(prior_of(l) is not None for l in ls): continue
+        updraws.append(pid)
+    out["unpriced_measurement_draws"] = updraws
+    if updraws:
+        _acked = [i for i in updraws if i in _dialect_notes]
+        _fresh = [i for i in updraws if i not in _dialect_notes]
+        if _acked:
+            print(f"\nUNPRICED DRAW  acknowledged unscoreable (dialect-3: draws are priced"
+                  f" BEFORE the submit click; no retro-prior): {', '.join(_acked)}")
+        if _fresh:
+            alerts.append(
+                f"ALERT unpriced-draw: {', '.join(_fresh)} — measurement draw(s) (kind "
+                f"submission/hidden-draw) with no prior ever registered, AFTER dialect-3 "
+                f"declared the standing rule (every *-hidden-draw registers prior + band "
+                f"before the submit click; 'if an outcome will arrive as a number we will "
+                f"cite, it gets a prior first'). Unscoreable forever — pricing now would be "
+                f"outcome-contaminated. Acknowledge on a kind-dialect-semantics line, and "
+                f"price the next one first")
+
+    # ── TS-DISORDER TRIPWIRE (2026-08-29, qwen38-swap) ──
+    # `ts` is NOT a reliable arrival clock: qwen38-swap's registration entered git 2026-08-26
+    # (blame 8b75576c, three lines BEFORE its resolution) yet is stamped 2026-08-29T11:30Z —
+    # read by ts it is a post-hoc prior on a known outcome; read by file order it is an
+    # ordinary honest bet. FILE ORDER is the append-only ledger's only honest clock; ts is
+    # advisory. But ts is load-bearing in one place — the substrate-scores-since 2026-08-24
+    # resolution-date gate — so a disordered stamp must become visible, never trusted.
+    # Presence check only, first trip per id: a line whose ts precedes a ts already seen on
+    # the same id.
+    # DAY granularity on purpose: same-day time-of-day wobble is batching, and date-only
+    # stamps ("2026-08-09") would false-positive against full timestamps under a raw string
+    # compare. The load-bearing consumer (the substrate gate) is a day boundary too.
+    ts_disorder, _ts_seen = [], {}
+    for l in lines:
+        pid, ts = l.get("id"), str(l.get("ts") or l.get("date") or "")[:10]
+        if not pid or len(ts) < 10: continue
+        prev = _ts_seen.get(pid)
+        if prev and ts < prev and pid not in {r["id"] for r in ts_disorder}:
+            ts_disorder.append({"id": pid, "ts": ts, "after": prev})
+        _ts_seen[pid] = ts if prev is None or ts > prev else prev
+    out["ts_disorder"] = ts_disorder
+    if ts_disorder:
+        # dialect-3 (7c64878) declared the semantics this tripwire asked for: ts is a
+        # HAND-STAMPED NOMINAL event time — a display label with a proven day-typo class.
+        # Authority order: (a) file append order, (b) git-blame arrival, (c) ts as label
+        # only; time-keyed gates resolve boundary cases by git-blame arrival, and a
+        # registration is valid iff it ARRIVES before its arm's results are known. The
+        # check now runs AS the declaration's check: named specimens stand, new ones alert.
+        _acked = [r for r in ts_disorder if r["id"] in _dialect_notes]
+        _fresh = [r for r in ts_disorder if r["id"] not in _dialect_notes]
+        if _acked:
+            print(f"TS-DISORDER  acknowledged day-typos (dialect-3: ts is a nominal label;"
+                  f" file order, then git blame, is the clock): "
+                  + ", ".join(f"{r['id']} ({r['ts']} vs {r['after']})" for r in _acked))
+        if _fresh:
+            named = ", ".join(f"{r['id']} ({r['ts']} after {r['after']})" for r in _fresh)
+            alerts.append(
+                f"ALERT ts-disorder: {len(_fresh)} id(s) carry a line whose `ts` DAY precedes "
+                f"a day already stamped on the same id ({named}). dialect-3 declares ts a "
+                f"hand-stamped nominal label with a known day-typo class — so this is a "
+                f"probable NEW typo. It matters only where time is load-bearing (the "
+                f"substrate-scores-since 2026-08-24 gate): boundary cases resolve by "
+                f"git-blame arrival, never ts. Acknowledge it on a kind-dialect-semantics "
+                f"line (id named) and it becomes a standing fact")
+
     # ── INSTRUMENT (2026-08-23) ──
     # Asked 08-22 (the ledger records decision + prior but never WHICH INSTRUMENT certified the
     # decision, so a retracted instrument had no path back to the decisions resting on it);
@@ -1429,6 +1520,21 @@ def main():
 
     out["alerts"] = alerts
     print()
+    # Standing stop-rule state prints HERE, at the bottom next to the alerts, because the
+    # sweep view reads `| tail -40` and the FAMILY MIX section (where the trip prints) had
+    # scrolled above the window as the instrument face grew — a standing fact promised
+    # "printed every sweep" that prints where the view no longer reaches is not printed
+    # (2026-08-29; the same decay class the ts-disorder alert names: a view correlate
+    # quietly stopped covering the thing it was cut to show).
+    for tf in out.get("family_mix_stop_ruled") or []:
+        _trip = next((c for c in out.get("family_mix_continue", [])
+                      if c["family"] == tf and c.get("tripped")), {})
+        _riders = [c["id"] for c in out.get("family_mix_continue", [])
+                   if c["family"] == tf and not c.get("tripped") and "resolved" not in c]
+        print(f"STANDING stop-rule TRIPPED: family '{tf}' ('{_trip.get('id', '?')}' resolved"
+              f" {_trip.get('resolved', '?')})"
+              + (f" · in-flight continue-reason heard: {', '.join(_riders)}"
+                 if _riders else ""))
     for a in alerts: print(a)
     if not alerts: print("no alerts.")
     if "--json" in argv:
