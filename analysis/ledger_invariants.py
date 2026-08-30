@@ -195,6 +195,17 @@ OUTCOME_DECLARED = {
     # Non-scoring ledger annotations, declared 2026-08-12 from the live census. Declaring
     # changes NO count (verdict_of already returns None for all of them) — it only keeps
     # the tripwire quiet so a genuinely new word stands out instead of drowning.
+    # `confirmed` — kind-dialect-semantics-4 (2026-08-30, be19d83): FACT ESTABLISHED,
+    # non-scored, counting on no calibration face. Arc gave it a STRUCTURAL legality
+    # condition rather than a stylistic one, which is what makes it absorbable at all:
+    # confirmed is legal ONLY on an entry carrying NO prior — a priced entry must use
+    # cleared/failed/void. So it can never quietly stand in for `cleared`. The corollary
+    # arc stated and this file enforces: if a question of that shape deserves a score, the
+    # fix is to PRICE IT AT REGISTRATION, never to score a `confirmed` after the fact —
+    # that is a post-hoc prior wearing a different token. The condition is checked below
+    # (confirmed-on-a-priced-entry alert); a declaration whose legality condition nothing
+    # tests is a comment, not a rule.
+    "confirmed": "nonscored",
     "protocol": "annotation", "parked": "annotation", "held": "annotation",
     "stop": "annotation", "amended-before-resolution": "annotation",
     "progress": "in-progress",
@@ -1114,6 +1125,35 @@ def main():
             tail = (f"appears only on id(s) {', '.join(who)} that never registered a prior"
                     " — a programme DECISION with no home in the audit layer (it scores nothing and is counted nowhere)")
         alerts.append(f"ALERT outcome-dialect: '{k}' is undeclared vocabulary and {tail}. Declare it in OUTCOME_DECLARED (both parsers) with the class it should carry, or have the ledger restate the line with a declared word")
+
+    # ── UNPRICED-ONLY VOCABULARY (2026-08-30, kind-dialect-semantics-4) ──
+    # Some declared words are legal only on an entry carrying NO prior, because their whole
+    # point is that no forecast was graded. `confirmed` is the first: it means the fact was
+    # established, not that a bet landed. Left untested, that legality condition would decay
+    # into prose — and the decay is silent and one-directional, because the tempting misuse
+    # (stamping `confirmed` on a priced arm whose result came in good) reads as a pass while
+    # scoring nothing. This is the same shape as the post-hoc prior the ts tripwire guards.
+    UNPRICED_ONLY = {"confirmed"}
+    illegal = []
+    for pid in dict.fromkeys(l.get("id") for l in lines if l.get("id")):
+        ls = [l for l in lines if l.get("id") == pid]
+        if not any(prior_of(l) is not None for l in ls): continue
+        for l in ls:
+            for w in (l.get("outcome"), l.get("resolution"), result_field(l)):
+                head = str(w or "").lower().split()[0].strip(".,;:—-*") if w else ""
+                if head in UNPRICED_ONLY:
+                    illegal.append({"id": pid, "word": head}); break
+    out["unpriced_only_violations"] = illegal
+    if illegal:
+        named = ", ".join(f"{r['id']} ('{r['word']}')" for r in illegal)
+        alerts.append(
+            f"ALERT vocabulary-legality: {named} — this word is declared legal ONLY on an "
+            f"entry with NO prior (kind-dialect-semantics-4: it means a fact was ESTABLISHED, "
+            f"not that a forecast landed), but the id carries one. A priced entry must "
+            f"resolve cleared/failed/void; both parsers currently file this terminal-but-"
+            f"UNSCORED, so the prior silently escapes the curve rather than being graded. "
+            f"Restate the resolution with a verdict word — never leave a priced bet resolved "
+            f"in unpriced vocabulary")
     out["outcome_dialect"] = {"classes": {c: sum(d.values()) for c, d in w_cls.items()},
                               "words": {c: d for c, d in w_cls.items()},
                               "new": {k: sorted(set(v)) for k, v in w_new.items()}}

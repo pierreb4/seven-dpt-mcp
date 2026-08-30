@@ -133,7 +133,14 @@ def is_void(l):
                for w in (l.get("outcome"), l.get("resolution"), result_field(l))) \
         or event_class(l) == "void"
 
-NONSCORED_WORDS = ("gray", "inconclusive", "ran-and-grayed", "ran-and-inconclusive")
+NONSCORED_WORDS = ("gray", "inconclusive", "ran-and-grayed", "ran-and-inconclusive",
+                   # `confirmed` (kind-dialect-semantics-4, 2026-08-30): fact established,
+                   # never scored. Legal ONLY on an unpriced entry, so on a well-formed
+                   # ledger it never reaches a scoring branch at all; listing it here makes
+                   # the ILLEGAL case (confirmed on a priced entry) fail safe — filed
+                   # terminal-but-unscored instead of silently read as a verdict — while
+                   # ledger_invariants raises the alert that gets it fixed.
+                   "confirmed")
 
 def is_nonscored(l):
     """THE MIDDLE WORLD in word form (2026-08-14). Mirrors
