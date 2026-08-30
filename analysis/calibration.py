@@ -104,8 +104,12 @@ def prior_of(l):
 _HEADS = {"CLEARED": 1, "FAILED": 0, "DEAD": 0, "KILLED": 0}
 def verdict_of(l):
     ec = event_class(l)
-    if ec is not None:
+    if ec is not None and ec != "unknown":
         return {"cleared": 1, "failed": 0}.get(ec)
+    # ec == "unknown" falls through to the declared-word carriers below (2026-08-30, mirrors
+    # ledger_invariants.verdict_of): an unrecognised status head is a DIALECT gap, not a
+    # verdict, and must not veto an explicit `outcome` on the same line. ship38p1-hidden-draw-2
+    # ("BAND FAILED ...", outcome "failed") was held off the curve by exactly that veto.
     # BOTH fields, same precedence as ledger_invariants (2026-08-13). Reading only the first
     # present one made this return None for {"resolution":"cleared","outcome":"positive-below-
     # threshold"} — a cleared bet silently off the curve. `refuted-by-run` is arc's token for

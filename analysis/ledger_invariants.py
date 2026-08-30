@@ -140,7 +140,20 @@ def verdict_of(l):
     ec = event_class(l)
     if ec in ("cleared", "failed"): return ec
     if ec == "nonscored": return "gray"   # terminal; PARK-STREAK classifies from the note
-    if ec is not None: return None        # void / ignore / unknown
+    if ec == "unknown":
+        pass   # 2026-08-30: an UNRECOGNISED status head must not veto the line's own declared
+               # verdict word. ship38p1-hidden-draw-2 arrived {"status": "BAND FAILED (2.23 >
+               # 1.95 upper bound)...", "outcome": "failed"} — the head is "BAND", so
+               # event_class said 'unknown' and this returned None, holding a squarely
+               # resolved bet in-flight while the disposition face read it as a verdict (the
+               # self-check caught the disagreement). That is the FOURTH bite of the
+               # read-one-carrier bug the comment below was written for, this time with an
+               # unparseable head as the vetoing carrier. Falling through does NOT guess: the
+               # loop demands an explicitly DECLARED verdict word, and the event-dialect
+               # tripwire still fires on the unmapped head, so the head gets fixed AND the
+               # bet keeps counting meanwhile. Precedence twin of "verdict anywhere beats
+               # gray anywhere" below.
+    elif ec is not None: return None      # void / ignore
     # BOTH fields, in the same precedence disposition() uses. Reading only the first present
     # field is the bug that has now bitten three separate functions: tr87-lens-ceiling arrived
     # as {"resolution":"cleared","outcome":"positive-below-threshold"} and this returned None,
@@ -1031,8 +1044,27 @@ def main():
         print(f"\nEVENT DIALECT  {ev_types.get('resolution', 0)} resolutions ({classes})"
               + (f" · other events: {others}" if others else "")
               + (f" · UNKNOWN STATUS: {len(ev_unknown)}" if ev_unknown else " · all mapped"))
+    # The consequence clause is COMPUTED, not asserted (2026-08-30). It used to state
+    # flatly that "the id reads in-flight, calibration n sticks" — true when written, and
+    # made false the same hour by the unknown-head fallthrough fix, which lets a declared
+    # `outcome` on the same line carry the verdict. An alert whose stated consequence has
+    # stopped happening trains the reader to discount it; the "0 positives" literal in the
+    # FAMILY MIX alert went stale exactly this way. So ask the reader we actually run.
     for i, s in ev_unknown:
-        alerts.append(f"ALERT event-dialect: '{i}' resolved event-style with status '{s}' — no head rule maps it (FAILED*/CLEARED*/VOID*/GRAY*/SUBSTRATE-*/*PREPUSH*; kind=substrate non-scored only pre-2026-08-24): the id reads in-flight, calibration n sticks, and the #34/#41 wake patterns may miss it. Extend event_class in calibration.py + ledger_invariants.py and re-check the wake patterns before trusting n")
+        rescued = verdict_of(next(l for l in lines if l.get("id") == i
+                                  and (l.get("status") or "") == s))
+        alerts.append(
+            f"ALERT event-dialect: '{i}' resolved event-style with status '{s}' — no head "
+            f"rule maps it (FAILED*/CLEARED*/VOID*/GRAY*/SUBSTRATE-*/*PREPUSH*; kind="
+            f"substrate non-scored only pre-2026-08-24). "
+            + (f"A declared verdict word on the same line carries it ({rescued}), so the id "
+               f"still resolves and n is intact — the DIALECT is the gap, not the count: "
+               f"extend event_class (both parsers) or have the ledger restate the head."
+               if rescued else
+               f"Nothing else on the line carries a verdict, so the id reads IN-FLIGHT and "
+               f"calibration n sticks; the #34/#41 wake patterns may miss it. Extend "
+               f"event_class in calibration.py + ledger_invariants.py and re-check the wake "
+               f"patterns before trusting n."))
     out["event_dialect"] = {"n": ev_types.get("resolution", 0), "classes": ev_classes,
                             "types": ev_types, "unknown": [i for i, _ in ev_unknown]}
 
