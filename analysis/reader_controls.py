@@ -108,6 +108,28 @@ CONTROLS = [
         probe=lambda t, inv: not any("PC-ackfield-draw" in a for a in inv.get("alerts") or []),
     ),
     dict(
+        name="acknowledgement stand-down is COUNTED, not just silent",
+        why="Arc writes the ledger AND the kind-dialect-semantics lines that silence our "
+            "tripwires — in-band, on the same append-only file. `no-mistakes` refuses that "
+            "shape by default (execution-bearing config is read only from the trusted default "
+            "branch); we cannot, since arc's ledger is the only channel there is, so we measure "
+            "the channel instead. Before this, a stand-down printed a STANDING line and was "
+            "counted by nothing, so the question that matters — is the alert set shrinking "
+            "because the RECORD improved or because it was ACKNOWLEDGED — had no number. This "
+            "plants a specimen AND its acknowledgement and requires the stand-down to appear in "
+            "the published denominator, attributed to the declaration that caused it.",
+        expect="pass",
+        plant=[{"ts": "2026-08-31T15:00:00Z", "id": "PC-standdown-draw", "kind": "hidden-draw",
+                "note": "synthetic control: unpriced draw, would alert on its own"},
+               {"ts": "2026-08-31T15:01:00Z", "id": "kind-dialect-semantics-PC4",
+                "kind": "scoring-note",
+                "note": "Acknowledging PC-standdown-draw as a known unscoreable specimen."}],
+        probe=lambda t, inv: any(
+            r.get("id") == "PC-standdown-draw"
+            and "kind-dialect-semantics-PC4" in (r.get("via") or [])
+            for r in inv.get("acknowledgement_standdowns") or []),
+    ),
+    dict(
         name="undeclared kind token ALERTs",
         why="The closed-vocabulary tripwire — the one remedy in this layer that has held "
             "since it was built. Controlled so it stays held.",

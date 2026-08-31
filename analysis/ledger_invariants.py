@@ -528,15 +528,19 @@ def _ack_tokens(lines):
     adds exactly two ids — memseed-draw1 (named in `dead_semantics`) and searchsolver-probe
     (named in `specimen_ack`) — both genuine, none spurious.
     WHICH FIELDS THIS TRUSTS: all of them except the structural keys in _ACK_SKIP."""
-    toks = set()
+    toks = {}
     for l in lines:
-        if not str(l.get("id", "")).startswith("kind-dialect-semantics"): continue
+        did = str(l.get("id", ""))
+        if not did.startswith("kind-dialect-semantics"): continue
         for k, v in l.items():
             if k in _ACK_SKIP: continue
             for t in _ACK_SPLIT.split(str(v or "")):
                 t = t.strip(".,;:")
-                if t: toks.add(t)
-    return toks
+                if t: toks.setdefault(t, set()).add(did)
+    # a dict answers `x in toks` exactly as the old set did, so no call site changes — but
+    # every stand-down can now name WHICH declaration silenced it, which is the whole point
+    # of the denominator below.
+    return {t: sorted(d) for t, d in toks.items()}
 
 
 # ── RULE LIVENESS (2026-08-31) ───────────────────────────────────────────────
@@ -1377,6 +1381,21 @@ def main():
     # the genus check — added above it — raised UnboundLocalError on the first run. Caught by
     # running, not by reading; one assignment now, so a later face cannot use it before it exists.
     _ack_toks = _ack_tokens(lines)
+    # ── ACKNOWLEDGEMENT DENOMINATOR (2026-08-31) ──
+    # Arc writes the ledger AND writes the kind-dialect-semantics lines that stand our
+    # tripwires down — in-band, on the same append-only file. That is deliberate (it is the
+    # ask-first channel we asked for) and arc has been scrupulous with it, but it means the
+    # audited party supplies the rule that silences the audit, which `no-mistakes` refuses by
+    # default for exactly this reason ("read only from trusted default-branch copy";
+    # allow_repo_commands defaults false). We cannot adopt that separation — arc's ledger is
+    # the only channel there is — so we do the next best thing and MEASURE the channel.
+    # Until now the standing lines were printed but never counted, so the one question that
+    # matters could not be asked: is the alert set shrinking because the RECORD got better,
+    # or because it got ACKNOWLEDGED? Same denominator logic as the reader-path census.
+    standdowns = []          # {face, id, via: [declaring ids]}
+
+    def _standdown(face, sid):
+        standdowns.append({"face": face, "id": sid, "via": _ack_toks.get(sid) or []})
     # STANDING lines are COLLECTED, not printed where they are computed. The sweep view is
     # `| tail -40` and this file is 170 lines of output: an acknowledged-specimen line printed
     # at its own face lands ~140 lines from the bottom and is not in the view at all. That
@@ -1435,6 +1454,7 @@ def main():
     out["genus_registration_violations"] = genus_viol
     if genus_viol:
         _gack = [r for r in genus_viol if r["id"] in _ack_toks]
+        for r in _gack: _standdown("genus x registration", r["id"])
         _gfresh = [r for r in genus_viol if r["id"] not in _ack_toks]
         if _gack:
             standing.append("STANDING genus x registration: acknowledged unscoreable "
@@ -1692,6 +1712,7 @@ def main():
     out["unpriced_measurement_draws"] = updraws
     if updraws:
         _acked = [i for i in updraws if i in _ack_toks]
+        for i in _acked: _standdown("unpriced draw", i)
         _fresh = [i for i in updraws if i not in _ack_toks]
         if _acked:
             standing.append("STANDING unpriced draw: acknowledged unscoreable (dialect-3: "
@@ -1778,6 +1799,7 @@ def main():
         # registration is valid iff it ARRIVES before its arm's results are known. The
         # check now runs AS the declaration's check: named specimens stand, new ones alert.
         _acked = [r for r in ts_disorder if r["id"] in _ack_toks]
+        for r in _acked: _standdown("ts-disorder", r["id"])
         _fresh = [r for r in ts_disorder if r["id"] not in _ack_toks]
         if _acked:
             standing.append("STANDING ts-disorder: acknowledged day-typos (dialect-3: ts is "
@@ -2035,6 +2057,19 @@ def main():
               "phrasing. Either the dialect moved under the rule (re-key it on the field "
               "that now carries the fact) or it was written against a phrasing that never "
               "existed (delete it). A rule nothing matches is not a passing check")
+    out["acknowledgement_standdowns"] = standdowns
+    if standdowns or alerts:
+        _by = {}
+        for r in standdowns:
+            for d in (r["via"] or ["(unattributed)"]): _by.setdefault(d, []).append(r["id"])
+        standing.append(
+            f"STANDING acknowledgement denominator: {len(standdowns)} specimen stand-down(s) "
+            f"across {len({r['face'] for r in standdowns})} face(s), by {len(_by)} declaration "
+            f"line(s), vs {len(alerts)} live alert(s). "
+            + " · ".join(f"{d} -> {', '.join(sorted(set(v)))}" for d, v in sorted(_by.items()))
+            + ". Arc writes both the record and the lines that silence our tripwires, so this "
+              "is the number that answers whether the alert set is shrinking because the "
+              "RECORD improved or because it was ACKNOWLEDGED. Counted, not judged")
     for _sl in standing: print(_sl)
     for a in alerts: print(a)
     if not alerts: print("no alerts.")
