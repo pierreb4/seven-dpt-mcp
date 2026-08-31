@@ -482,6 +482,88 @@ def status_class(l):
 def kind_tokens(l):
     return {t for t in re.split(r"[+/,;\s]+", str(l.get("kind") or "").lower()) if t}
 
+# ── acknowledgement lexer (2026-08-31) ──────────────────────────────────────
+# WAS: `" ".join(dialect notes)` + `id in blob` — a bare SUBSTRING test, so any id that is a
+# strict PREFIX of a longer named id read as ACKNOWLEDGED and its ALERT silently became a
+# STANDING line. That is the rewarded-misuse direction of every acknowledgement rule (the
+# next specimen hiding behind the standing line), and a planted control confirmed it is
+# REACHABLE, not merely latent: `PC-prefix-collision` was absorbed by a note naming only
+# `PC-prefix-collision-EXTENDED`. dialect-6 already keys the ts-correction path on id SHAPE
+# for exactly this reason (`re.fullmatch`); this is the same fix for the older path.
+# TOKENS, never substrings: prose delimiters split, trailing sentence punctuation is
+# trimmed, the hyphens INSIDE an id are kept (an apostrophe splits, so a possessive yields
+# the bare id). WHICH FIELD THIS TRUSTS: `note` on kind-dialect-semantics lines only —
+# the same channel as before; only the matching discipline changed.
+# Counts unmoved on the live ledger: the acknowledged set is the same 7 ids either way.
+# The residual direction is now the SAFE one — a phrasing this lexer cannot tokenise
+# ALERTS as a fresh specimen instead of silently standing.
+_ACK_SPLIT = re.compile(r"[^A-Za-z0-9_.-]+")
+
+def _ack_tokens(lines):
+    """Id-shaped tokens named on the dialect's own declaration lines."""
+    toks = set()
+    for l in lines:
+        if not str(l.get("id", "")).startswith("kind-dialect-semantics"): continue
+        for t in _ACK_SPLIT.split(str(l.get("note", "") or "")):
+            t = t.strip(".,;:")
+            if t: toks.add(t)
+    return toks
+
+
+# ── RULE LIVENESS (2026-08-31) ───────────────────────────────────────────────
+# A phrasing-keyed rule that matches NOTHING cannot fail, so every green it produces is
+# vacuous — it points, and it points away. That is the shape of the most expensive bite in
+# this layer's history: the alert-honesty self-check recovered an alert's claim by regexing
+# ONE phrasing, matched 0 alerts for weeks, and returned a confident green the whole time.
+# A match COUNTER alone would have caught it the day it was written.
+#
+# THE DISTINCTION THAT KEEPS THIS FROM BECOMING NOISE — and it is the whole design:
+#   EXTRACT rules recover a fact that is SUPPOSED to be there. Zero matches = the rule is
+#           dead (dialect moved, or it was written against a phrasing that never existed).
+#           This ALERTS.
+#   DETECT rules find a VIOLATION. Zero matches = good news, the violation is absent.
+#           This is reported, never alerted — alerting on a clean detector is exactly how a
+#           tripwire earns being ignored.
+# Every entry names the FIELDS IT TRUSTS (standing rule since the dialect-5 ts anchor was
+# itself a typo: a gate must say which field carries it). `id` counts as a field here — the
+# first cut of this census omitted it and reported dialect-6's live id-shape rule as DEAD.
+def _rx(p, f=0): return re.compile(p, f)
+RULE_REGISTRY = [
+    # (name, role, compiled pattern, fields it reads)
+    ("note-classifier DECISIVE", "extract", DECISIVE, ("note", "why", "result")),
+    ("note-classifier INSIDE",   "extract", INSIDE,   ("note", "why", "result")),
+    ("POWER-v2 self-stated SE",  "extract", _rx(r"SE\s*[~≈=]?\s*\+?/?-?\s*[0-9]", re.I), ("criterion",)),
+    ("CI bracket",               "extract", CI,       ("note", "why", "result", "criterion")),
+    ("dialect-6 ts-correction id shape", "extract", _rx(r"^ts-correction-\d+-\d+$"), ("id",)),
+    ("dialect acknowledgement id", "extract", _rx(r"^kind-dialect-semantics"), ("id",)),
+    ("CONTINUE REASON head",     "extract", _rx(r"^CONTINUE REASON"), ("note", "why")),
+    ("STOP RULE head",           "extract", _rx(r"STOP RULE"), ("note", "why")),
+    ("instrument stamp",         "extract", _rx(r"\S"), ("instrument",)),
+    ("walk-away word",           "extract", _rx(r"^(withdrawn|refused|declined|killed)", re.I),
+                                             ("outcome", "resolution", "result", "status")),
+    ("verdict head",             "extract", _rx(r"^(cleared|failed|dead|killed)", re.I),
+                                             ("outcome", "resolution", "result", "status")),
+    ("INSTR_BAD verdict word",   "detect",  _rx(r"\b(unsound|vacuous|retired|insufficient|"
+                                                r"retracted|broken|wrong-unit|cannot-fail)", re.I),
+                                             ("instrument",)),
+    # `confirmed` is EXTRACT, not detect: this row asks only whether the word is still in
+    # live use (dialect-4 vocabulary). Whether a given use is LEGAL — the priced/unpriced
+    # condition — is the vocabulary-legality face's job, and labelling this a violation
+    # detector would have the print assert a check that lives elsewhere.
+    ("UNPRICED_ONLY `confirmed`", "extract", _rx(r"^confirmed", re.I),
+                                             ("outcome", "resolution", "result")),
+]
+
+def rule_liveness(lines):
+    """Match count per declared rule. A zero-match EXTRACT rule is dead by construction."""
+    rows = []
+    for name, role, rx, fields in RULE_REGISTRY:
+        n = sum(1 for l in lines
+                if any(rx.search(str(l.get(f) or "")) for f in fields))
+        rows.append({"rule": name, "role": role, "matches": n,
+                     "fields": list(fields), "dead": bool(role == "extract" and n == 0)})
+    return rows
+
 def is_substrate(l):
     return "substrate" in kind_tokens(l)
 
@@ -1409,10 +1491,8 @@ def main():
     # An id NAMED in a kind-dialect-semantics line is an ACKNOWLEDGED specimen: the
     # declaration vehicle (arc's ask-first channel — e21349b, c1069e7, dialect-3 7c64878)
     # has ruled on it, so it prints as a standing fact; the ALERT form is reserved for
-    # specimens the dialect has not seen. Presence check only (id string in the note),
-    # the same discipline as the head reads.
-    _dialect_notes = " ".join(str(l.get("note", "")) for l in lines
-                              if str(l.get("id", "")).startswith("kind-dialect-semantics"))
+    # specimens the dialect has not seen.
+    _ack_toks = _ack_tokens(lines)
     DRAW_KINDS = {"submission", "hidden-draw"}
     updraws = []
     for pid in dict.fromkeys(l.get("id") for l in lines if l.get("id")):
@@ -1423,8 +1503,8 @@ def main():
         updraws.append(pid)
     out["unpriced_measurement_draws"] = updraws
     if updraws:
-        _acked = [i for i in updraws if i in _dialect_notes]
-        _fresh = [i for i in updraws if i not in _dialect_notes]
+        _acked = [i for i in updraws if i in _ack_toks]
+        _fresh = [i for i in updraws if i not in _ack_toks]
         if _acked:
             print(f"\nUNPRICED DRAW  acknowledged unscoreable (dialect-3: draws are priced"
                   f" BEFORE the submit click; no retro-prior): {', '.join(_acked)}")
@@ -1508,8 +1588,8 @@ def main():
         # only; time-keyed gates resolve boundary cases by git-blame arrival, and a
         # registration is valid iff it ARRIVES before its arm's results are known. The
         # check now runs AS the declaration's check: named specimens stand, new ones alert.
-        _acked = [r for r in ts_disorder if r["id"] in _dialect_notes]
-        _fresh = [r for r in ts_disorder if r["id"] not in _dialect_notes]
+        _acked = [r for r in ts_disorder if r["id"] in _ack_toks]
+        _fresh = [r for r in ts_disorder if r["id"] not in _ack_toks]
         if _acked:
             print(f"TS-DISORDER  acknowledged day-typos (dialect-3: ts is a nominal label;"
                   f" file order, then git blame, is the clock): "
@@ -1740,6 +1820,30 @@ def main():
               + ", ".join(str(r["line"]) for r in _fa)
               + ". New unacknowledged specimens still ALERT; arc's read is that the error "
                 "recurs at day boundaries, which is exactly when slot stamps are the measurand.")
+    # ── RULE LIVENESS face (bottom-printed per the tail -40 rule) ──
+    _rl = rule_liveness(lines)
+    out["rule_liveness"] = _rl
+    _dead = [r for r in _rl if r["dead"]]
+    _thin = [r for r in _rl if not r["dead"] and r["role"] == "extract" and r["matches"] <= 2]
+    # Detector hit-counts are reported, never interpreted here — whether a hit is a problem
+    # is the owning face's ruling, and restating it would be a second opinion from the same head.
+    print(f"RULE LIVENESS  {len(_rl)} declared rules, 0 dead · detectors: "
+          + " · ".join(f"{r['rule']} {r['matches']} hit(s)"
+                       for r in _rl if r["role"] == "detect")
+          + " · extractors thin(<=2): "
+          + (", ".join(f"{r['rule']} {r['matches']}" for r in _thin) if _thin else "none")
+          if not _dead else
+          f"RULE LIVENESS  {len(_rl)} declared rules · {len(_dead)} DEAD (see alert)")
+    if _dead:
+        alerts.append(
+            "ALERT dead-rule: " + ", ".join(f"{r['rule']} (reads {'/'.join(r['fields'])})"
+                                            for r in _dead)
+            + " — matched NOTHING on the whole ledger. An extractor with no matches cannot "
+              "fail, so every green downstream of it is vacuous: this is the shape of the "
+              "alert-honesty self-check that stayed pinned green for weeks by regexing one "
+              "phrasing. Either the dialect moved under the rule (re-key it on the field "
+              "that now carries the fact) or it was written against a phrasing that never "
+              "existed (delete it). A rule nothing matches is not a passing check")
     for a in alerts: print(a)
     if not alerts: print("no alerts.")
     if "--json" in argv:

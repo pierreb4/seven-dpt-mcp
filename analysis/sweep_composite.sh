@@ -42,6 +42,17 @@ INV_RC=${PIPESTATUS[0]}
 echo "== self-check"
 python3 "$HERE/self_check.py"
 SC_RC=$?
+
+# Reader controls (2026-08-31): can each reader still DISSENT? self_check asks whether the
+# faces AGREE; this asks the prior question — whether any of them can say "no" at all. Two
+# faces that agree because neither can see the specimen are consistent and both wrong, which
+# is the pinned-green shape that cost this layer its most expensive bite. Planted specimens
+# through the real sweep path, so it costs one extra pass over 476 lines.
+# rc IS consulted (it joins self_check's rank): a reader that has lost the ability to dissent
+# has not published a number, it has published a silence.
+echo "== reader controls"
+python3 "$HERE/reader_controls.py"
+RC_RC=$?
 set -e
 
 # Recon face (spark #48, 2026-08-16): transient channel over tracked EXTERNAL primaries
@@ -65,4 +76,5 @@ fi
 # A contradiction BETWEEN faces outranks any alert FROM a face: if the layers disagree about
 # what happened, no number in this sweep has been established yet. rc=2 says so distinctly.
 if [ "$SC_RC" -ne 0 ]; then exit "$SC_RC"; fi
+if [ "$RC_RC" -ne 0 ]; then exit "$RC_RC"; fi
 exit "$INV_RC"

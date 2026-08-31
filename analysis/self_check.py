@@ -128,10 +128,29 @@ if disp:
 #     structured `alert_claims` channel the alert builder writes at the point it asserts.
 claimed = {c["id"] for c in (inv.get("alert_claims") or [])
            if c.get("claims") == "in-flight"}
-for a in inv.get("alerts") or []:
-    claimed |= set(re.findall(r"in-flight '([^']+)'", a))
+_structured = len(claimed)
+_alerts = inv.get("alerts") or []
+_prose_hits = 0
+for a in _alerts:
+    m = set(re.findall(r"in-flight '([^']+)'", a))
+    if m: _prose_hits += 1
+    claimed |= m
 check("alerts: every id claimed in-flight IS in-flight", claimed <= inv_inflight,
       f"claimed but not in-flight: {sorted(claimed - inv_inflight)}")
+#     RULE LIVENESS for the fallback (2026-08-31). The check above can only ever be as
+#     strong as the size of `claimed`, and a `claimed` that is empty BY CONSTRUCTION reads
+#     exactly like a `claimed` that is empty because every alert is honest. That is not a
+#     hypothetical: this regex matched 0 alerts for weeks while two alerts made the precise
+#     false claim it exists to catch. So the PROVENANCE of the set is printed unconditionally
+#     — a reader can see whether the green above was earned or vacuous — and a fallback that
+#     parses none of a non-empty alert list says so in its own line rather than staying quiet.
+print(f"  note  claim provenance: {_structured} from the structured alert_claims channel,"
+      f" {_prose_hits} of {len(_alerts)} alert(s) matched by the prose fallback"
+      + ("  [NO in-flight claim in either channel this sweep — the check above is"
+         " UNEXERCISED, not evidence that the alerts are honest]"
+         if _alerts and not claimed else
+         ("  [prose fallback matched nothing; the structured channel is carrying the check]"
+          if _alerts and not _prose_hits else "")))
 #     Positive control for the channel itself: the rewarded misuse here is an alert that
 #     warns about a resolved id — it reads diligent, costs nothing, and is false. Confirm the
 #     reader can SEE such a claim rather than merely finding none.
