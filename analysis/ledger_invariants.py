@@ -81,7 +81,7 @@ Env: ARC_PRIOR_LEDGER (path) · STREAK_K (default 6) · NOISE_MDE + NOISE_UNIT, 
      · CHANNEL_STRICT=1
 Usage: ledger_invariants.py [--json] [--asof YYYY-MM-DD]
 """
-import json, os, re, sys
+import datetime, json, os, re, sys
 
 LEDGER = os.path.expanduser(os.environ.get("ARC_PRIOR_LEDGER",
          "~/projects/arc-agi-3/launch/prior-ledger.jsonl"))
@@ -1045,6 +1045,9 @@ def main():
     # terminal the parsers cannot see would silently stick calibration n and starve the
     # #34/#41 wake greps. ALERT and extend event_class in BOTH parsers before trusting n.
     subst_ids = {l.get("id") for l in lines if is_substrate(l)}
+    latest_head = {}                      # id -> last line (file order) bearing a status head
+    for l in lines:
+        if l.get("id") and (l.get("status") or "").strip(): latest_head[l["id"]] = l
     ev_types, ev_classes, ev_unknown = {}, {}, []
     for l in lines:
         ev = l.get("event")
@@ -1063,11 +1066,25 @@ def main():
             # (that is drift); a missing head alerts only when nothing else carries a verdict
             # (that is the real n-sticking danger this tripwire exists for).
             if not (l.get("status") or "").strip() and verdict_of(l): continue
-            # Carry the LINE, not (id, status). 2026-08-31: an absent status makes that
-            # pair a NON-UNIQUE key — `next(... status == "")` then re-found the id's
-            # REGISTRATION line, read no outcome off it, and printed the false
-            # "reads IN-FLIGHT" clause about two ids the same JSON listed as resolved.
-            ev_unknown.append((l.get("id") or "?", l.get("status") or "", l))
+            # SUPERSESSION (2026-09-01). The ledger is APPEND-ONLY, so an unmapped head can
+            # never be removed — only RESTATED on a later line. Judging every historical
+            # resolution meant the only correct remedy could not close the alert: arc appended
+            # canonical FAILED heads (event:"head-restatement") and both alerts fired again,
+            # unchanged. An alert whose remedy is impossible by construction is decorative and
+            # trains its reader to skim — the decay class fixed on 08-31 for double-reporting.
+            # So the question is "does this id's LATEST head map?", not "did every head it ever
+            # wore map?". Latest = FILE ORDER, per dialect-3 (file order > git blame > ts).
+            # This does NOT swallow drift: a sham restatement — a new head that is also
+            # unmapped, which reads as compliance and closes the alert while changing nothing —
+            # still alerts, and alerts QUOTING THE NEWEST HEAD, because the newest head is the
+            # one a reader must go fix. (Positive-controlled on exactly that misuse; the first
+            # cut of this rule kept alerting but quoted the superseded head, which is the
+            # comment-asserts-what-the-code-does-not failure this file has now hit twice.)
+            newest = latest_head.get(l.get("id"), l)
+            if newest is not l and event_class(
+                    dict(newest, event="resolution")) != "unknown":
+                continue
+            ev_unknown.append((newest.get("id") or "?", newest.get("status") or "", newest))
     if ev_types:
         classes = " ".join(f"{k}:{v}" for k, v in sorted(ev_classes.items()))
         others = " ".join(f"{k}:{v}" for k, v in sorted(ev_types.items()) if k != "resolution")
@@ -1080,7 +1097,10 @@ def main():
     # `outcome` on the same line carry the verdict. An alert whose stated consequence has
     # stopped happening trains the reader to discount it; the "0 positives" literal in the
     # FAMILY MIX alert went stale exactly this way. So ask the reader we actually run.
+    seen_dialect = set()
     for i, s, ln in ev_unknown:
+        if i in seen_dialect: continue
+        seen_dialect.add(i)
         rescued = verdict_of(ln)          # the resolution line ITSELF, not a re-lookup
         if not rescued: alert_claims.append({"id": i, "claims": "in-flight",
                                              "alert": "event-dialect"})
@@ -1163,6 +1183,48 @@ def main():
                 head = str(w or "").lower().split()[0].strip(".,;:—-*") if w else ""
                 if head in UNPRICED_ONLY:
                     illegal.append({"id": pid, "word": head}); break
+    # ── AMENDMENT-PRIOR LEGALITY (kind-dialect-semantics-5, adopted 2026-09-01) ──
+    # Declared on this layer's own census: 12 arms carried >=2 priced entries but only 2 ever
+    # CHANGED the prior — the other ten re-emitted an unchanged number as context, so any
+    # series over "arms with multiple priced updates" would read ten flat lines as evidence of
+    # updating discipline. Arc's fix: an amendment that does NOT revise the prior OMITS the
+    # field, so a `prior` on an amendment now MEANS a revision. Wired here rather than in
+    # calibration.py because it is a LEGALITY rule about ledger hygiene, not scoring
+    # vocabulary — calibration reads the registration prior and is untouched by it.
+    # The rewarded misuse is precisely the habit being retired: carrying the number forward
+    # looks diligent, costs nothing, and inflates the updating count. Positive-controlled on
+    # that, not on an arbitrary violation.
+    # The gate is FILE POSITION of the declaring line, NOT its ts. First cut keyed it to
+    # `ts >= "2026-09-01"` — using the one field dialect-3 declares unreliable as the authority
+    # for a legality gate, and the declaration's own stamp turned out to be a +1-day typo, so
+    # the gate's anchor was itself the error class it was gating on. File order is dialect-3's
+    # first authority precisely because it cannot be hand-mistyped: everything appended AFTER
+    # the convention was declared is subject to it. If the declaration is absent the rule has
+    # no scope and nothing fires — stated so a reader does not mistake silence for compliance.
+    decl = next((n for n, l in enumerate(lines)
+                 if l.get("id") == "kind-dialect-semantics-5"), None)
+    prior_seen, flat_amend = {}, []
+    for n, l in enumerate(lines):
+        i, pr = l.get("id"), l.get("prior")
+        if not i: continue
+        if pr is None:
+            prior_seen.setdefault(i, None); continue
+        is_amend = bool(l.get("amends")) or l.get("kind") == "amendment"
+        if (is_amend and prior_seen.get(i) is not None and pr == prior_seen[i]
+                and decl is not None and n > decl):
+            flat_amend.append({"id": i, "prior": pr, "ts": l.get("ts"), "line": n + 1})
+        prior_seen[i] = pr
+    out["flat_amendment_priors"] = flat_amend
+    if flat_amend:
+        named = ", ".join(f"{r['id']} (prior {r['prior']} re-emitted unchanged)"
+                          for r in flat_amend)
+        alerts.append(
+            f"ALERT amendment-prior: {named} — since the convention was declared (ledger "
+            f"line {(decl or 0) + 1}) a `prior` on an "
+            f"amendment line MEANS a revision (kind-dialect-semantics-5). Re-emitting the "
+            f"same number carries no belief-revision signal but counts as an update on every "
+            f"face that reads entry counts, which is how a flat line comes to wear signal's "
+            f"clothes. Omit the field when the prior has not moved.")
     out["unpriced_only_violations"] = illegal
     if illegal:
         named = ", ".join(f"{r['id']} ('{r['word']}')" for r in illegal)
@@ -1388,6 +1450,48 @@ def main():
     # DAY granularity on purpose: same-day time-of-day wobble is batching, and date-only
     # stamps ("2026-08-09") would false-positive against full timestamps under a raw string
     # compare. The load-bearing consumer (the substrate gate) is a day boundary too.
+    # ── FUTURE-TS TRIPWIRE (2026-08-31) ──
+    # ts is a HAND-STAMPED nominal label with a proven day-typo class (dialect-3), and the
+    # disorder check below only catches labels that go BACKWARDS. A cluster stamped +1 day is
+    # perfectly monotonic, so it passed silently: five lines read 2026-09-01 while the wall
+    # clock said 08-31 and git blame put every one of them on 08-31, clock-times matching to
+    # the minute. Pierre caught it by looking at the date; no instrument did. A ts later than
+    # today is wrong BY CONSTRUCTION — no judgement, no threshold, no false-positive story —
+    # which makes it the cheapest check in this file and the one with the longest gap between
+    # "the rule existed" and "something executed it". Reported, never corrected: the ledger is
+    # append-only and the stamps are display labels, so file order already carries authority.
+    _today = datetime.date.today().isoformat()
+    future_ts = [{"id": l.get("id"), "ts": l.get("ts"), "line": n + 1}
+                 for n, l in enumerate(lines) if str(l.get("ts") or "")[:10] > _today]
+    # ACKNOWLEDGEMENT (2026-08-31, same round). These lines are IMMUTABLE — append-only, and
+    # the correct remedy is a correction line, not a rewrite. So an alert that keeps shouting
+    # at full volume forever has, again, a remedy it cannot accept: exactly the decay the
+    # head-supersession fix addressed an hour earlier, and the reason the acknowledged-specimen
+    # rule exists. A `scoring-note` whose id is `ts-correction-<first>-<last>` acknowledges that
+    # inclusive LINE RANGE; acknowledged specimens print as a STANDING fact at the bottom and
+    # ALERT is reserved for NEW ones. Keyed to the id, not to prose in the note, because
+    # grepping a correction's sentences is the pinned-quantity generator this file keeps
+    # rediscovering. Arc's own read predicts recurrence at day boundaries — precisely when slot
+    # stamps are the measurand — so the alert MUST stay live for unacknowledged specimens.
+    ack = []
+    for l in lines:
+        m = re.fullmatch(r"ts-correction-(\d+)-(\d+)", str(l.get("id") or ""))
+        if m and l.get("kind") == "scoring-note": ack.append((int(m[1]), int(m[2])))
+    def _acked(n): return any(a <= n <= b for a, b in ack)
+    future_ack = [r for r in future_ts if _acked(r["line"])]
+    future_ts  = [r for r in future_ts if not _acked(r["line"])]
+    out["future_ts"] = future_ts
+    out["future_ts_acknowledged"] = future_ack
+    if future_ts:
+        named = ", ".join(f"line {r['line']} {r['id']} @{r['ts']}" for r in future_ts[:6])
+        alerts.append(
+            f"ALERT future-ts: {len(future_ts)} line(s) stamped after today ({_today}) — "
+            f"{named}{' …' if len(future_ts) > 6 else ''}. A nominal label cannot describe a "
+            f"time that has not happened, so these are day-typos of the dialect-3 class. "
+            f"Nothing is mis-scored — file order carries authority and the ledger is "
+            f"append-only, so do NOT rewrite them — but any gate keyed to ts is reading a "
+            f"wrong number, and a reader dating the round from the stamps will be off.")
+
     ts_disorder, _ts_seen = [], {}
     for l in lines:
         pid, ts = l.get("id"), str(l.get("ts") or l.get("date") or "")[:10]
@@ -1628,6 +1732,14 @@ def main():
               f" {_trip.get('resolved', '?')})"
               + (f" · in-flight continue-reason heard: {', '.join(_riders)}"
                  if _riders else ""))
+    _fa = out.get("future_ts_acknowledged") or []
+    if _fa:
+        print(f"STANDING ts-correction: {len(_fa)} line(s) carry a +1-day nominal stamp, "
+              f"acknowledged on the ledger and NOT rewritten (append-only; file order and git "
+              f"arrival carry authority) — lines "
+              + ", ".join(str(r["line"]) for r in _fa)
+              + ". New unacknowledged specimens still ALERT; arc's read is that the error "
+                "recurs at day boundaries, which is exactly when slot stamps are the measurand.")
     for a in alerts: print(a)
     if not alerts: print("no alerts.")
     if "--json" in argv:
