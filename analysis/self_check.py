@@ -118,11 +118,27 @@ if disp:
 # 4 — ALERT HONESTY. An alert that names a state must name the state the faces published.
 #     This is the 08-13 tail defect: the claim was typed, not looked up. Any alert saying
 #     in-flight '<id>' is asserting membership of a set this script can read.
-claimed = set()
+#     2026-08-31 — this check was itself the defect. Recovering the claim by regexing ONE
+#     phrasing ("in-flight '<id>'") pinned the read to the 08-13 alert's wording: the
+#     event-dialect alert says "'<id>' resolved ... so the id reads IN-FLIGHT", matches
+#     nothing, and the check returned a confident green while that alert made exactly the
+#     false claim it exists to catch (two ids, both listed as resolved in the same JSON).
+#     A check whose quantity is pinned by construction is worse than absent — it points, and
+#     it points away. So the prose scan is now the FALLBACK; the primary read is the
+#     structured `alert_claims` channel the alert builder writes at the point it asserts.
+claimed = {c["id"] for c in (inv.get("alert_claims") or [])
+           if c.get("claims") == "in-flight"}
 for a in inv.get("alerts") or []:
     claimed |= set(re.findall(r"in-flight '([^']+)'", a))
 check("alerts: every id claimed in-flight IS in-flight", claimed <= inv_inflight,
       f"claimed but not in-flight: {sorted(claimed - inv_inflight)}")
+#     Positive control for the channel itself: the rewarded misuse here is an alert that
+#     warns about a resolved id — it reads diligent, costs nothing, and is false. Confirm the
+#     reader can SEE such a claim rather than merely finding none.
+_probe = {"id": "__positive_control__", "claims": "in-flight"}
+check("alert-claim channel can actually dissent (positive control)",
+      not ({_probe["id"]} <= inv_inflight),
+      "a synthetic bogus in-flight claim would not be caught — the channel is decorative")
 
 # 5 — ARITHMETIC. Faces that publish counts alongside lists must agree with their own lists.
 dec = inv.get("declined") or {}

@@ -660,6 +660,13 @@ def main():
     noise = load_noise()
     # ids (not just counts) are published so self_check.py can hold this layer against
     # calibration.py and against this layer's OWN alert text — see that script's header.
+    # alert_claims: the MACHINE-READABLE companion to the alert prose. self_check used to
+    # recover an alert's factual claim by regexing the sentence ("in-flight '<id>'"), which
+    # pins the check to ONE phrasing — every differently-worded alert was invisible to it and
+    # the check could only ever return green (2026-08-31; it did, on two false claims in the
+    # same file). An alert that asserts a set-membership registers it HERE; the check reads
+    # data, not prose. See ~/.claude/insights/verify-a-check-can-report-both-its-verdicts.md
+    alert_claims = []
     alerts, out = [], {"asof": asof, "n_resolved": len(resolved), "n_inflight": len(inflight),
                        "inflight_ids": [r["id"] for r in inflight],
                        "resolved_ids": [r["id"] for r in resolved]}
@@ -1048,7 +1055,19 @@ def main():
         if ec == "unknown" and l.get("id") in subst_ids: ec = "nonscored-kind"
         ev_classes[ec] = ev_classes.get(ec, 0) + 1
         if ec == "unknown":
-            ev_unknown.append((l.get("id") or "?", l.get("status") or ""))
+            # An ABSENT status head is not dialect drift. 2026-08-31: four of four alerts
+            # this round were "rescued" ones, two of them from lines with no `status` field
+            # at all — a legitimate line shape whose verdict rides `outcome`, already policed
+            # by the OUTCOME-DIALECT tripwire below. Double-reporting a covered case is how
+            # an alert channel trains its reader to skim. So: an unmapped head ALWAYS alerts
+            # (that is drift); a missing head alerts only when nothing else carries a verdict
+            # (that is the real n-sticking danger this tripwire exists for).
+            if not (l.get("status") or "").strip() and verdict_of(l): continue
+            # Carry the LINE, not (id, status). 2026-08-31: an absent status makes that
+            # pair a NON-UNIQUE key — `next(... status == "")` then re-found the id's
+            # REGISTRATION line, read no outcome off it, and printed the false
+            # "reads IN-FLIGHT" clause about two ids the same JSON listed as resolved.
+            ev_unknown.append((l.get("id") or "?", l.get("status") or "", l))
     if ev_types:
         classes = " ".join(f"{k}:{v}" for k, v in sorted(ev_classes.items()))
         others = " ".join(f"{k}:{v}" for k, v in sorted(ev_types.items()) if k != "resolution")
@@ -1061,9 +1080,10 @@ def main():
     # `outcome` on the same line carry the verdict. An alert whose stated consequence has
     # stopped happening trains the reader to discount it; the "0 positives" literal in the
     # FAMILY MIX alert went stale exactly this way. So ask the reader we actually run.
-    for i, s in ev_unknown:
-        rescued = verdict_of(next(l for l in lines if l.get("id") == i
-                                  and (l.get("status") or "") == s))
+    for i, s, ln in ev_unknown:
+        rescued = verdict_of(ln)          # the resolution line ITSELF, not a re-lookup
+        if not rescued: alert_claims.append({"id": i, "claims": "in-flight",
+                                             "alert": "event-dialect"})
         alerts.append(
             f"ALERT event-dialect: '{i}' resolved event-style with status '{s}' — no head "
             f"rule maps it (FAILED*/CLEARED*/VOID*/GRAY*/SUBSTRATE-*/*PREPUSH*; kind="
@@ -1077,7 +1097,7 @@ def main():
                f"event_class in calibration.py + ledger_invariants.py and re-check the wake "
                f"patterns before trusting n."))
     out["event_dialect"] = {"n": ev_types.get("resolution", 0), "classes": ev_classes,
-                            "types": ev_types, "unknown": [i for i, _ in ev_unknown]}
+                            "types": ev_types, "unknown": [i for i, _, _ in ev_unknown]}
 
     # ── OUTCOME-DIALECT TRIPWIRE (built 2026-08-12) ──
     # Verdicts also arrive as plain `outcome`/`resolution` words, and the v3.1 event
@@ -1591,6 +1611,7 @@ def main():
             out["store"] = {"parked": len(parked), "orphaned": len(orphaned)}
 
     out["alerts"] = alerts
+    out["alert_claims"] = alert_claims
     print()
     # Standing stop-rule state prints HERE, at the bottom next to the alerts, because the
     # sweep view reads `| tail -40` and the FAMILY MIX section (where the trip prints) had
