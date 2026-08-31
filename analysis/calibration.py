@@ -44,6 +44,25 @@ Env:  ARC_PRIOR_LEDGER (default ~/projects/arc-agi-3/launch/prior-ledger.jsonl)
 """
 import json, math, os, re, sys
 
+# ── the DECLARED VOCABULARY is arc's, not ours: ONE source, both parsers ─────
+# Until 2026-08-31 this file re-encoded subsets of ledger_invariants.OUTCOME_DECLARED as
+# literal tuples. Measured: `is_declined`'s tuple missed nothing only because prefix matching
+# happens to catch `refused-by-evidence`, and `DECLARED_RESULT_WORDS` missed TEN declared
+# words outright (closed, parked, relabel, held, stop, progress, protocol, correction, and the
+# two amended-before-*). Both latent, neither guarded — and the second was introduced the same
+# afternoon a MIRROR bug was being fixed, by writing a second differently-structured
+# implementation instead of sharing the first.
+# WHAT IS SHARED AND WHAT IS NOT: the VOCABULARY is a fact about arc's dialect and has one
+# home. The DERIVATIONS stay independent — that independence is where the cross-layer check's
+# signal actually comes from (every catch on record was two independently-computed PUBLISHED
+# FACTS disagreeing, never two independently-typed word lists), so sharing the words costs it
+# nothing. self_check.py still imports NEITHER parser; that separation is untouched.
+# ledger_invariants has no import-time side effects and does not import this file (checked).
+from ledger_invariants import OUTCOME_DECLARED
+
+DECLINED_WORDS = tuple(sorted((w for w, c in OUTCOME_DECLARED.items() if c == "declined"),
+                              key=len, reverse=True))
+
 LEDGER = os.path.expanduser(os.environ.get("ARC_PRIOR_LEDGER",
          "~/projects/arc-agi-3/launch/prior-ledger.jsonl"))
 STORE  = os.environ.get("SEVEN_DPT_DB") or os.path.join(
@@ -199,8 +218,7 @@ def is_declined(l):
     a bare `withdrawn` prefix: the three unpriced kills of the same night carry
     {"outcome":"void","result":"withdrawn"} and a prefix rule would silently pull them out of
     void, which is arc's call to make, not ours."""
-    return any(str(w or "").lower().startswith(("refused", "declined", "premise-refuted",
-                                                "no-arm", "withdrawn-at-adversary"))
+    return any(str(w or "").lower().startswith(DECLINED_WORDS)
                for w in (l.get("outcome"), l.get("resolution"), result_field(l)))
 
 def last_disposition(ls):
@@ -245,9 +263,13 @@ def is_substrate(l):
 # a declared set to check against. ledger_invariants.OUTCOME_DECLARED is the source of truth
 # for the vocabulary; this is the subset calibration reads, and it exists because a mirror
 # that re-derives the rule from scratch is how the two parsers drift apart.
-DECLARED_RESULT_WORDS = (VOID_WORDS + NONSCORED_WORDS + SPLIT_WORDS
-                         + ("cleared", "failed", "refuted-by-run", "refused", "declined",
-                            "premise-refuted", "no-arm", "withdrawn-at-adversary", "withdrawn"))
+# Derived from the shared vocabulary, plus the words this parser reads that are not in it
+# (VOID/NONSCORED/SPLIT are calibration-side scoring classes). Deriving rather than listing is
+# the point: a word absorbed into OUTCOME_DECLARED now reaches BOTH parsers, which is what the
+# `dialect vocabulary reaches BOTH parsers` control in reader_controls.py asserts.
+DECLARED_RESULT_WORDS = tuple(sorted(
+    set(OUTCOME_DECLARED) | set(VOID_WORDS) | set(NONSCORED_WORDS) | set(SPLIT_WORDS),
+    key=len, reverse=True))
 
 def result_field(l):
     """Mirrors ledger_invariants.py. `result` as a verdict carrier: kind=resolution lines

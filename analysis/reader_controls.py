@@ -279,6 +279,56 @@ CONTROLS = [
 ]
 
 
+# ── vocabulary controls ─────────────────────────────────────────────────────
+# A different shape from the planted-specimen controls above: these assert a property of the
+# READERS THEMSELVES rather than of a ledger line, so they cannot be expressed as a plant.
+# They run in a SUBPROCESS, which is what lets this file keep importing neither parser — the
+# no-import rule exists so a control cannot inherit the bug it is testing, and shelling out
+# preserves that while still letting the check reach inside the modules.
+VOCAB_CONTROLS = [
+    dict(
+        name="dialect vocabulary reaches BOTH parsers",
+        why="Until 2026-08-31 calibration.py re-encoded subsets of OUTCOME_DECLARED as literal "
+            "tuples. Measured then: `is_declined`'s tuple missed nothing ONLY because prefix "
+            "matching happens to catch `refused-by-evidence`, and DECLARED_RESULT_WORDS missed "
+            "TEN declared words outright. Both latent, neither guarded. The dialect grows by "
+            "absorption — 20+ words since 08-05 — so 'latent' is a schedule, not a state. This "
+            "adds a synthetic word to the shared vocabulary and requires BOTH parsers to see "
+            "it; a future re-literalisation of either list turns it red.",
+        # THE ORDER OF THESE IMPORTS IS THE WHOLE CONTROL. The first cut re-derived
+        # C.DECLINED_WORDS inside the probe — which tested THIS FILE'S re-derivation, not
+        # calibration's, and passed with calibration's old literal tuple restored. A control
+        # pinned green while auditing pinned-green readers; caught only by running the
+        # meta-test. Instead: extend the shared vocabulary BEFORE calibration is imported, so
+        # calibration's own module-level derivation is what gets exercised. Re-literalise that
+        # list and this goes red, which is the property being bought.
+        code = """
+import sys, io, json, contextlib
+sys.path.insert(0, %r)
+import ledger_invariants as L
+probe = "synthetic-declined-probe"
+L.OUTCOME_DECLARED[probe] = "declined"
+L._DECL_ORDER = sorted(L.OUTCOME_DECLARED, key=len, reverse=True)   # import-time list
+with contextlib.redirect_stdout(io.StringIO()):
+    import calibration as C          # derives its own words HERE, from the extended vocabulary
+line = {"id": "X", "outcome": probe}
+print(json.dumps({"inv": bool(L.is_declined(line)), "cal": bool(C.is_declined(line))}))
+""",
+        probe=lambda r: r.get("inv") is True and r.get("cal") is True,
+    ),
+]
+
+
+def run_vocab(c):
+    """Run one vocabulary control in a subprocess; return its parsed JSON (or {})."""
+    r = subprocess.run([sys.executable, "-c", c["code"] % HERE],
+                       capture_output=True, text=True)
+    for ln in reversed((r.stdout or "").strip().split("\n")):
+        try: return json.loads(ln)
+        except ValueError: continue
+    return {}
+
+
 def base_lines():
     seen, out = set(), []
     for p in (A, B):
@@ -329,8 +379,16 @@ def main():
         elif VERBOSE:
             print(f"        {c['why']}")
 
+    for c in VOCAB_CONTROLS:
+        try: ok = bool(c["probe"](run_vocab(c)))
+        except Exception as e: ok = False
+        print(f"  {'ok  ' if ok else 'FAIL'} {c['name']}")
+        if not ok:
+            bad.append((c, False)); print(f"        {c['why']}")
+        elif VERBOSE: print(f"        {c['why']}")
+
     n_x = sum(1 for c in CONTROLS if c["expect"] == "xfail")
-    print(f"\n  {len(CONTROLS) - len(bad)}/{len(CONTROLS)} as declared"
+    print(f"\n  {len(CONTROLS) + len(VOCAB_CONTROLS) - len(bad)}/{len(CONTROLS) + len(VOCAB_CONTROLS)} as declared"
           f"  ({n_x} tracked blind spot(s) — see --verbose)")
     if bad:
         print("  A reader stopped behaving as declared. Either it lost the ability to see a")
