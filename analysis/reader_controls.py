@@ -7,7 +7,11 @@ or ONE field, every other phrasing became invisible to it, and the empty match s
 printed as a fact about the world instead of a failure to understand. Six bites in three
 weeks (alert-honesty regex pinned green; unknown event head vetoing a line's own verdict
 word; a non-unique lookup key; a flat `;` split dropping an instrument stamp; CONTINUE
-REASON heard only from `note`; acknowledgement by bare substring).
+REASON heard only from `note`; acknowledgement by bare substring) — and a SEVENTH the day
+after this file was written, when arc restated a disposition on a declared carrier exactly
+as asked and the count did not move, because a DIFFERENT reader (`event_class` -> 'ignore')
+vetoed the line before its carrier was ever consulted. That one is why the suite now carries
+regression controls on real lines, not only planted ones.
 
 The project's answer each time was a positive control written at the point of the fix: plant
 a synthetic specimen, confirm the reader can see it. That discipline works — and it was
@@ -25,8 +29,8 @@ ledger_invariants.py as a subprocess, exactly as sweep_composite.sh runs it. Not
 imported from the parsers: a control that calls the helper it is testing inherits the helper's
 bug and returns a confident green, which is the failure mode this file exists to prevent.
 
-EXPECTED-FAIL IS A FIRST-CLASS RESULT. Two controls are known blind spots with a stated
-reason, and they are marked xfail rather than left red. A suite that is permanently red gets
+EXPECTED-FAIL IS A FIRST-CLASS RESULT. A known blind spot ships as an xfail carrying its
+reason rather than as a red light or a silent gap. A suite that is permanently red gets
 ignored — this project has already recorded that an alert whose remedy the reader cannot
 perform is decorative, and the only stable response is to stop reading it. An xfail that
 starts PASSING is reported as loudly as a pass that starts failing: both mean the dialect
@@ -121,32 +125,88 @@ CONTROLS = [
                              and any("dead-rule" in a for a in inv.get("alerts") or []),
     ),
     dict(
-        name="walk-away declared ONLY in `note`",
-        why="KNOWN BLIND SPOT, accepted. `stage3-eval-r3` (2026-08-19) states 'WITHDRAWN AT "
-            "ROUND 11, never registered' in `note` alone; its disposition is None and the "
-            "unpriced-walk-away face reports 4 where the truth is 5 (verified: moving that "
-            "same fact onto a declared carrier takes the count to 5). NOT fixed by adding "
-            "`note` as a carrier — `criterion` and `void_conditions` carry CONDITIONAL heads "
-            "('CLEARED iff the draw lands in [1.33, 1.95]'), so widening the carrier set "
-            "buys false verdicts to cure a missed one. The fix belongs on arc's side: state "
-            "a disposition on a declared carrier. Tracked here so the gap has a number.",
-        expect="xfail",
-        plant=[{"ts": "2026-08-31T10:08:00Z", "id": "PC-note-only-walkaway", "kind": "eval",
-                "note": "WITHDRAWN at the adversary round, never registered, zero GPU spent."}],
-        probe=lambda t, inv: any("PC-note-only-walkaway" in a for a in inv.get("alerts") or []),
+        name="stage3-eval-r3 IS counted (dialect-7 restatement lands)",
+        why="Regression control on a REAL line, not a planted one. Arc restated the "
+            "disposition on `result` per dialect-7 — and the count still read 4, because "
+            "`event: head-restatement` classes as 'ignore' and the unpriced face vetoed on "
+            "ANY event class, discarding the carrier the restatement existed to supply. 6th "
+            "bite of unknown-head-vetoes-the-carrier; the identical fix shipped for "
+            "verdict_of in 0eeba5b and this face was never revisited. If this goes red the "
+            "veto has crept back.",
+        expect="pass",
+        plant=[],
+        probe=lambda t, inv: "stage3-eval-r3" in
+                             ((inv.get("unpriced_walkaway") or {}).get("since_adoption") or []),
     ),
     dict(
-        name="terminal head on a bare `status`",
-        why="KNOWN BLIND SPOT, accepted. STATUS_HEADS maps only WITHDRAWN, so "
-            "`status: 'DEAD at the gate, never registered'` (real: `memseed-draw1`) is read "
-            "by nothing — while `DEAD` IS a verdict word to verdict_of. The same word means "
-            "different things to different readers of this layer. Deliberately narrow: the "
-            "bare-status population is mostly prose and state (OPEN, PRE-RUN, STAGED), and "
-            "alerting on prose is what makes a tripwire get ignored. Tracked, not widened.",
+        name="never-registered + FAILED head reads WALK-AWAY",
+        why="Arc's requested both-ways test, direction 1 (dialect-7 dead_semantics). The "
+            "discriminator is REGISTRATION, not the verb: 'never registered' in a status head "
+            "marks the walk-away genus whatever verdict word accompanies it. FAILED is used "
+            "here precisely because it is the word that would otherwise read as a calibration "
+            "verdict.",
+        expect="pass",
+        plant=[{"ts": "2026-08-31T12:00:00Z", "id": "PC-neverreg-failed",
+                "kind": "adversary-block",
+                "status": "FAILED at the gate, never registered", "why": "synthetic control"}],
+        probe=lambda t, inv: "PC-neverreg-failed" in
+                             ((inv.get("unpriced_walkaway") or {}).get("ids") or []),
+    ),
+    dict(
+        name="REGISTERED id is never flattened to a walk-away",
+        why="Arc's requested both-ways test, direction 2 — the sharp version. A PRICED id "
+            "whose status head ALSO carries the phrase must NOT read as a walk-away: "
+            "registration state outranks the phrase, which is the whole content of 'the "
+            "discriminator is REGISTRATION, not the verb'. Flattening here would inject a "
+            "non-event into prior calibration — the exact harm arc declined to risk by "
+            "refusing to let us wire DEAD as a word.",
+        expect="pass",
+        plant=[{"ts": "2026-08-31T12:01:00Z", "id": "PC-registered-dead", "kind": "ab",
+                "prior": 0.4, "why": "synthetic control"},
+               {"ts": "2026-08-31T12:02:00Z", "id": "PC-registered-dead", "kind": "resolution",
+                "status": "DEAD at the gate, never registered", "result": "failed",
+                "note": "synthetic control: priced, so registration state must win"}],
+        probe=lambda t, inv: "PC-registered-dead" not in
+                             ((inv.get("unpriced_walkaway") or {}).get("ids") or []),
+    ),
+    dict(
+        name="prose on `result` does NOT score",
+        why="Guards the dialect-7 widening of `result_field`. 17 live lines carry a `result` "
+            "outside kind=resolution and most are instrument PROSE — 'FAILED — no candidate "
+            "beats levels'. The bare-token condition is what keeps opening `result` from "
+            "reopening the hole dialect-2's gate was closed against; without this control that "
+            "condition could be relaxed by anyone and nothing would say so.",
+        expect="pass",
+        plant=[{"ts": "2026-08-31T12:03:00Z", "id": "PC-prose-result", "kind": "instrument",
+                "result": "FAILED — synthetic control prose, must not read as a verdict"}],
+        probe=lambda t, inv: (inv.get("disposition") or {}).get("PC-prose-result") != "verdict",
+    ),
+    dict(
+        name="walk-away on `outcome` of an unpriced id ALERTs",
+        why="Positive control for the dialect-7 carrier-legality face. Zero live violations, so "
+            "without a planted specimen the check is indistinguishable from a rule that cannot "
+            "fire — the pinned-green shape. Only the `outcome` half is wired: the mirror rule "
+            "collides with dialect-2 (17 priced lines carry cleared/failed on `result` as "
+            "correct practice) and is an open question back to arc.",
+        expect="pass",
+        plant=[{"ts": "2026-08-31T12:04:00Z", "id": "PC-miscarried", "kind": "eval",
+                "outcome": "withdrawn", "note": "synthetic: walk-away on the wrong carrier"}],
+        probe=lambda t, inv: any("PC-miscarried" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="walk-away declared ONLY in `note`",
+        why="STILL A TRACKED GAP, but the reason changed. The specimen that motivated it "
+            "(stage3-eval-r3) is CURED — arc restated it on `result` per dialect-7 — so this no "
+            "longer costs a live number. What remains is the class: `note` is not a carrier and "
+            "will not become one, because `criterion` and `void_conditions` carry CONDITIONAL "
+            "heads ('CLEARED iff the draw lands in [1.33, 1.95]') and widening buys false "
+            "verdicts to cure a missed one. Post-dialect-7 a note-only disposition is a "
+            "WRITER-side violation rather than a reader gap. Kept xfail so that stays visible; "
+            "an XPASS here would mean someone widened the carrier set.",
         expect="xfail",
-        plant=[{"ts": "2026-08-31T10:09:00Z", "id": "PC-bare-dead", "kind": "adversary-block",
-                "status": "DEAD at the gate, never registered", "why": "synthetic control"}],
-        probe=lambda t, inv: any("PC-bare-dead" in a for a in inv.get("alerts") or []),
+        plant=[{"ts": "2026-08-31T12:05:00Z", "id": "PC-note-only-walkaway", "kind": "eval",
+                "note": "WITHDRAWN at the adversary round, never registered, zero GPU spent."}],
+        probe=lambda t, inv: any("PC-note-only-walkaway" in a for a in inv.get("alerts") or []),
     ),
 ]
 

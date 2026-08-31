@@ -192,6 +192,15 @@ OUTCOME_DECLARED = {
     "cleared": "verdict", "failed": "verdict",
     "void": "void", "amended-before-running": "void",
     "relabel": "adjudication", "correction": "bookkeeping", "closed": "unscorable",
+    # Bare `withdrawn` (2026-08-31). It was a WALKAWAY_WORD, a STATUS_HEAD and a member of
+    # self_check's TERMINAL_CLASSES, and yet undeclared here — so the same word classed
+    # three ways across this layer's readers and to `disposition()` meant nothing at all.
+    # That is the cross-reader divergence the 08-31 round found, fixed for this word.
+    # Class is `withdrawn`, NOT `declined`: `declined` would put it in dec_ids, and the
+    # UNPRICED WALK-AWAY face skips dec_ids — which would silently cancel the very count
+    # arc restated stage3-eval-r3 to correct. `withdrawn-at-adversary` -> declined is a
+    # different, arc-declared thing (652bbdf) and is untouched.
+    "withdrawn": "withdrawn",
     # Non-scoring ledger annotations, declared 2026-08-12 from the live census. Declaring
     # changes NO count (verdict_of already returns None for all of them) — it only keeps
     # the tripwire quiet so a genuinely new word stands out instead of drowning.
@@ -541,6 +550,10 @@ RULE_REGISTRY = [
     ("instrument stamp",         "extract", _rx(r"\S"), ("instrument",)),
     ("walk-away word",           "extract", _rx(r"^(withdrawn|refused|declined|killed)", re.I),
                                              ("outcome", "resolution", "result", "status")),
+    # dialect-7's registration discriminator is a phrase-in-a-head — the class this layer
+    # keeps being bitten by — so its match count is tracked like any other extractor.
+    ("dialect-7 never-registered discriminator", "extract",
+     _rx(r"never\s+(registered|priced)", re.I), ("status",)),
     ("verdict head",             "extract", _rx(r"^(cleared|failed|dead|killed)", re.I),
                                              ("outcome", "resolution", "result", "status")),
     ("INSTR_BAD verdict word",   "detect",  _rx(r"\b(unsound|vacuous|retired|insufficient|"
@@ -568,11 +581,23 @@ def is_substrate(l):
     return "substrate" in kind_tokens(l)
 
 def result_field(l):
-    """`result` as a verdict carrier, ONLY on kind=resolution lines (declared 2026-08-18,
-    arc's kind-dialect-semantics-2: 'classing rides the `result` word'). Everywhere else
-    `result` stays v2 prose, read solely under status=closed via the _HEADS whitelist —
-    opening it on every line would let free text score."""
-    return l.get("result") if "resolution" in kind_tokens(l) else None
+    """`result` as a verdict carrier: kind=resolution lines (dialect-2, 2026-08-18, arc's
+    'classing rides the `result` word'), OR a BARE declared disposition token (dialect-7,
+    2026-08-31, which makes `result` a general terminal-disposition carrier).
+
+    The bare-token condition is what keeps dialect-7 from reopening the hole dialect-2's gate
+    was closed against, and it is a vocabulary test, not a phrasing test. On the live ledger
+    17 lines carry a `result` outside kind=resolution, and most are instrument PROSE —
+    "FAILED — no candidate beats levels", "CLEARED, and it moves the programme...". Reading
+    those as verdicts would inject two spurious ones. Every genuine dialect-7 disposition is
+    instead a single token drawn from the declared vocabulary (`withdrawn`, `refused`), so
+    the discriminator is: the WHOLE field is one word AND that word is declared. Prose cannot
+    satisfy it, and a new word fails it loudly through the outcome-dialect tripwire rather
+    than scoring quietly."""
+    if "resolution" in kind_tokens(l): return l.get("result")
+    w = str(l.get("result") or "").strip()
+    if w and " " not in w and outcome_class(w.lower()) != "NEW": return l.get("result")
+    return None
 
 def crit_of(pre):
     return pre.get("criterion") or pre.get("why") or ""
@@ -1307,6 +1332,44 @@ def main():
             f"same number carries no belief-revision signal but counts as an update on every "
             f"face that reads entry counts, which is how a flat line comes to wear signal's "
             f"clothes. Omit the field when the prior has not moved.")
+    # ── DISPOSITION-CARRIER LEGALITY (kind-dialect-semantics-7, arc 2026-08-31) ──
+    # Declared on our ask. The split: `outcome` carries CALIBRATION verdicts on ids that were
+    # REGISTERED with a prior; `result` carries WALK-AWAY dispositions on ids that never got
+    # one. The rewarded misuse is the tidy-looking one — putting a walk-away on `outcome`
+    # because that is where verdicts "go" — which files an unpriced non-event alongside
+    # graded forecasts and lets it read as a resolution that simply did not score.
+    #
+    # ONLY THE `outcome` HALF IS WIRED, DELIBERATELY. The mirror rule (a calibration verdict
+    # on `result` belongs on `outcome`) COLLIDES WITH DIALECT-2: `result_field()` exists
+    # because arc declared 2026-08-18 that "classing rides the `result` word" on resolution
+    # lines, and 17 priced lines on the live ledger carry cleared/failed/void on `result` as
+    # correct practice. Forward-dating would only delay the collision, not resolve it, so
+    # that half is an OPEN QUESTION back to arc rather than a rule we inferred. Stated here
+    # so a later reader does not "complete" the symmetry and fire on 17 good lines.
+    # Gate is FILE POSITION of the declaring line, never its ts (dialect-3/5 standing rule).
+    _d7 = next((n for n, l in enumerate(lines)
+                if l.get("id") == "kind-dialect-semantics-7"), None)
+    _priced_ids = {l.get("id") for l in lines if prior_of(l) is not None}
+    miscarried = []
+    if _d7 is not None:
+        for n, l in enumerate(lines):
+            if n <= _d7 or not l.get("id"): continue
+            if l.get("id") in _priced_ids: continue
+            w = str(l.get("outcome") or "").lower()
+            if w.startswith(("withdrawn", "refused", "declined")):
+                miscarried.append({"id": l.get("id"), "word": w.split()[0], "line": n + 1})
+    out["carrier_legality_violations"] = miscarried
+    if miscarried:
+        alerts.append(
+            "ALERT carrier-legality: "
+            + ", ".join(f"{r['id']} ('{r['word']}' on `outcome`, line {r['line']})"
+                        for r in miscarried)
+            + " — kind-dialect-semantics-7 reserves `outcome` for CALIBRATION verdicts on "
+              "ids registered with a prior, and `result` for WALK-AWAY dispositions on ids "
+              "that never got one. A walk-away on `outcome` files an unpriced non-event in "
+              "the channel graded forecasts arrive on, where it reads as a resolution that "
+              "merely failed to score. Restate it on `result`")
+
     out["unpriced_only_violations"] = illegal
     if illegal:
         named = ", ".join(f"{r['id']} ('{r['word']}')" for r in illegal)
@@ -1445,12 +1508,32 @@ def main():
                                    # so older ids print as context and only a LAPSE SINCE
                                    # ADOPTION alerts — same contract as CHANNEL STAMP.
 
+    # dialect-7 REGISTRATION DISCRIMINATOR (arc, 2026-08-31, line 477 `dead_semantics`).
+    # We asked whether `DEAD` should join WALKAWAY_WORDS. Arc's answer was better than the
+    # question: do NOT wire the verb — the discriminator is REGISTRATION. "never registered"
+    # (or "never priced") in a status head marks the walk-away genus whatever verdict word
+    # accompanies it, and the SAME word on a registered id keeps its verdict_of meaning
+    # (DEAD -> failed). Wiring DEAD as a walk-away word would have made that mapping
+    # ambiguous and, on a registered id, injected a non-event into prior calibration.
+    # The caller already guarantees the unpriced half of the condition (it skips any id
+    # carrying a prior, just above), so this reads only where arc says it applies.
+    # WHICH FIELD THIS TRUSTS: `status`, whole value — the phrase sits after the head word
+    # ("DEAD at the gate, never registered"), so a head-only read would miss it.
+    # NOTE THE SHAPE: this is itself a phrase-in-a-head, i.e. the very class this layer keeps
+    # being bitten by. Arc flagged that when declaring it. It is therefore registered in
+    # RULE_REGISTRY for liveness and positive-controlled in BOTH directions in
+    # reader_controls.py (registered+DEAD must read failed; never-registered+FAILED must read
+    # walk-away) before anything downstream is allowed to trust it.
+    NEVER_REGISTERED = re.compile(r"never\s+(registered|priced)", re.I)
+
     def _walk_word(l):
         for w in (result_field(l), l.get("result"), l.get("outcome"), l.get("resolution")):
             lw = str(w or "").lower()
             if lw.startswith(WALKAWAY_WORDS): return lw.split()[0]
         head = (str(l.get("status") or "").split() or [""])[0].lower().strip(".,;:—-*")
-        return head if head.startswith(WALKAWAY_WORDS) else None
+        if head.startswith(WALKAWAY_WORDS): return head
+        if NEVER_REGISTERED.search(str(l.get("status") or "")): return "never-registered"
+        return None
 
     unpriced = []
     for pid in dict.fromkeys(l.get("id") for l in lines if l.get("id")):
@@ -1459,7 +1542,17 @@ def main():
         if any(prior_of(l) is not None for l in ls): continue      # priced -> countable already
         hits = [(l.get("ts") or "", l) for l in ls if _walk_word(l)]
         if not hits: continue
-        if any(event_class(l) is not None for _, l in hits): continue
+        # An `ignore`-class event is BOOKKEEPING and must not veto a line's own declared
+        # disposition. This vetoed on ANY event class, so arc's dialect-7 head-restatements
+        # (`event: "head-restatement"` -> 'ignore') were discarded and the count stayed at 4
+        # after arc had put `result: withdrawn` on the line precisely to fix it: the carrier
+        # was present, correct, and read by nothing. That is the 6th bite of unknown-head-
+        # vetoes-the-carrier, and the identical fix already shipped for verdict_of in 0eeba5b
+        # — this face was never revisited, which is exactly the "the old path is now the
+        # defect and nothing goes back for it" failure the last round wrote down as standing.
+        # Classes that carry a REAL disposition (cleared/failed/void/nonscored/unknown) still
+        # veto: there the event channel has genuinely already accounted for the id.
+        if any(event_class(l) not in (None, "ignore") for _, l in hits): continue
         ts, l0 = sorted(hits, key=lambda h: h[0])[0]
         unpriced.append({"id": pid, "ts": ts[:10], "word": _walk_word(l0),
                          "classed_as": final_cls.get(pid) or "nothing"})

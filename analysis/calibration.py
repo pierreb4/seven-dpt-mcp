@@ -241,12 +241,33 @@ def is_substrate(l):
     measurement draw scores as an ordinary forecast — which it did, silently."""
     return "substrate" in kind_tokens(l)
 
+# Words this parser ACTS on, gathered in one place so the dialect-7 bare-token test below has
+# a declared set to check against. ledger_invariants.OUTCOME_DECLARED is the source of truth
+# for the vocabulary; this is the subset calibration reads, and it exists because a mirror
+# that re-derives the rule from scratch is how the two parsers drift apart.
+DECLARED_RESULT_WORDS = (VOID_WORDS + NONSCORED_WORDS + SPLIT_WORDS
+                         + ("cleared", "failed", "refuted-by-run", "refused", "declined",
+                            "premise-refuted", "no-arm", "withdrawn-at-adversary", "withdrawn"))
+
 def result_field(l):
-    """Mirrors ledger_invariants.py. `result` as a verdict carrier, ONLY on kind=resolution
-    lines (declared 2026-08-18, arc's kind-dialect-semantics-2: 'classing rides the `result`
-    word'). Everywhere else `result` stays v2 prose, read solely under status=closed via the
-    _HEADS whitelist — opening it on every line would let free text score."""
-    return l.get("result") if "resolution" in kind_tokens(l) else None
+    """Mirrors ledger_invariants.py. `result` as a verdict carrier: kind=resolution lines
+    (dialect-2, 2026-08-18, 'classing rides the `result` word'), OR a BARE declared
+    disposition token (dialect-7, 2026-08-31, which makes `result` a general
+    terminal-disposition carrier).
+
+    The bare-token condition is the guard, not decoration: 17 lines on the live ledger carry
+    a `result` outside kind=resolution and most are instrument PROSE ("FAILED — no candidate
+    beats levels"), which would score as verdicts if `result` were simply opened. Whole field
+    == one word AND that word is declared; prose cannot satisfy it.
+
+    MIRROR DISCIPLINE: this widening shipped in ledger_invariants first and the two parsers
+    disagreed for one run — self_check caught it as a cross-layer DECLINED mismatch
+    (memseed-draw1 on one side only). That is what the cross-layer check is for, and it is
+    the reason this docstring says MIRRORS in the first line."""
+    if "resolution" in kind_tokens(l): return l.get("result")
+    w = str(l.get("result") or "").strip()
+    if w and " " not in w and w.lower().startswith(DECLARED_RESULT_WORDS): return l.get("result")
+    return None
 
 def wilson(k, n, z=1.96):
     if n == 0: return (0.0, 1.0)
