@@ -144,6 +144,24 @@ CONTROLS = [
         probe=lambda t, inv: "synthetic-undeclared-kind" in t,
     ),
     dict(
+        name="alert remedies name the REAL edit sites",
+        why="Three alerts told the operator to 'extend X in BOTH parsers'. Two were stale — the "
+            "OUTCOME_DECLARED one within hours of that constant being single-sourced, the "
+            "KIND_TOKENS one for WEEKS (recorded as stale in project memory, alert text never "
+            "touched). An alert whose remedy names an architecture that no longer exists sends "
+            "the reader to edit a file with nothing to edit. The text is now COMPUTED from "
+            "which files actually define the name; this control plants an undeclared kind token "
+            "and requires the resulting alert to name ledger_invariants ONLY — it goes red if "
+            "anyone re-hardcodes 'both parsers', and it also goes red (correctly, wanting the "
+            "text updated) if KIND_TOKENS is ever genuinely duplicated again.",
+        expect="pass",
+        plant=[{"ts": "2026-08-31T16:00:00Z", "id": "PC-editsite", "kind": "synthetic-editsite-kind",
+                "note": "synthetic control: undeclared kind token"}],
+        probe=lambda t, inv: any(
+            "Extend KIND_TOKENS in ledger_invariants.py ONLY" in a
+            for a in inv.get("alerts") or []),
+    ),
+    dict(
         name="`confirmed` on a PRICED entry ALERTs",
         why="dialect-4's legality condition is what made the word absorbable: `confirmed` on "
             "a priced arm reads as a pass while scoring nothing. A declared rule nothing "

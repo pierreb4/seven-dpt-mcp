@@ -488,6 +488,34 @@ def status_class(l):
         if s.startswith(head): return cls
     return None
 
+# ── where does a declared name actually live? COMPUTED, never asserted ───────
+# Three alerts told the operator to "extend X in BOTH parsers". Two had gone stale: the
+# OUTCOME_DECLARED one within hours (calibration.py now imports it), and the KIND_TOKENS one
+# for WEEKS — it was recorded as stale in project memory and the alert text was never touched.
+# An alert whose remedy names an architecture that no longer exists sends the reader to edit a
+# file that has nothing to edit, which is the comment-asserts-what-code-does-not failure this
+# file has now recorded three times. The precedent is 0eeba5b's fix: make the consequence
+# clause COMPUTED, because an asserted one went stale within the hour of being written.
+# This reports only what it can see — which parser files DEFINE the name — and claims nothing
+# about why. `event_class` is genuinely in both today, so that alert keeps saying so; if it is
+# ever consolidated the text follows without anyone remembering to.
+_PARSER_FILES = ("ledger_invariants.py", "calibration.py")
+
+def edit_sites(name):
+    """-> human phrase naming the files that define `name`. Never cached: cheap, and a cached
+    answer is exactly the staleness this replaces."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    rx = re.compile(r"^(?:def\s+)?" + re.escape(name) + r"\b\s*[=(]", re.M)
+    hits = []
+    for f in _PARSER_FILES:
+        fp = os.path.join(here, f)
+        try:
+            if rx.search(open(fp).read()): hits.append(f)
+        except OSError: pass
+    if len(hits) > 1:  return f"in BOTH parsers ({' + '.join(hits)})"
+    if len(hits) == 1: return f"in {hits[0]} ONLY"
+    return "(no definition site found — locate it before editing)"
+
 def kind_tokens(l):
     return {t for t in re.split(r"[+/,;\s]+", str(l.get("kind") or "").lower()) if t}
 
@@ -1241,7 +1269,7 @@ def main():
             f"substrate non-scored only pre-2026-08-24). "
             + (f"A declared verdict word on the same line carries it ({rescued}), so the id "
                f"still resolves and n is intact — the DIALECT is the gap, not the count: "
-               f"extend event_class (both parsers) or have the ledger restate the head."
+               f"extend event_class ({edit_sites('event_class')}) or have the ledger restate the head."
                if rescued else
                f"Nothing else on the line carries a verdict, so the id reads IN-FLIGHT and "
                f"calibration n sticks; the #34/#41 wake patterns may miss it. Extend "
@@ -1295,7 +1323,7 @@ def main():
         else:
             tail = (f"appears only on id(s) {', '.join(who)} that never registered a prior"
                     " — a programme DECISION with no home in the audit layer (it scores nothing and is counted nowhere)")
-        alerts.append(f"ALERT outcome-dialect: '{k}' is undeclared vocabulary and {tail}. Declare it in OUTCOME_DECLARED (both parsers) with the class it should carry, or have the ledger restate the line with a declared word")
+        alerts.append(f"ALERT outcome-dialect: '{k}' is undeclared vocabulary and {tail}. Declare it in OUTCOME_DECLARED ({edit_sites('OUTCOME_DECLARED')}) with the class it should carry, or have the ledger restate the line with a declared word")
 
     # ── UNPRICED-ONLY VOCABULARY (2026-08-30, kind-dialect-semantics-4) ──
     # Some declared words are legal only on an entry carrying NO prior, because their whole
@@ -1979,7 +2007,7 @@ def main():
         tail = ("it already token-matches `substrate`, so it correctly does NOT score — confirm that is intended"
                 if is_substrate({"kind": kv}) else
                 "it will SCORE as an ordinary forecast; if it names a measurement draw the value must contain `substrate`")
-        alerts.append(f"ALERT kind-dialect: kind '{kv}' carries unknown token(s) [{new}] on {', '.join(sorted(set(i for i in ids if i)))} — {tail}. Extend KIND_TOKENS in both parsers")
+        alerts.append(f"ALERT kind-dialect: kind '{kv}' carries unknown token(s) [{new}] on {', '.join(sorted(set(i for i in ids if i)))} — {tail}. Extend KIND_TOKENS {edit_sites('KIND_TOKENS')}")
     out["kind_census"] = {"values": kinds, "unknown": {k: sorted(set(v)) for k, v in kind_unknown.items()}}
 
     # ── ORPHANED EXISTENTIALS (seven-dpt store, if present) ──
