@@ -316,6 +316,34 @@ print(json.dumps({"inv": bool(L.is_declined(line)), "cal": bool(C.is_declined(li
 """,
         probe=lambda r: r.get("inv") is True and r.get("cal") is True,
     ),
+    dict(
+        name="reader-path census names the known hidden gate",
+        why="Regression control on the instrument built to find bite 7. The UNPRICED WALK-AWAY "
+            "face names outcome/resolution/result/status in its own source but ALSO reads "
+            "`event`, via event_class — the veto reader that discarded arc's correct "
+            "restatement. The census must keep naming it. Discrimination was verified by hand "
+            "when the census was built: remove the veto and the `event` row DISAPPEARS, so this "
+            "is tracking a real path rather than listing every field.",
+        code = """
+import sys, io, json, contextlib, collections
+sys.path.insert(0, %r)
+import reader_paths as RP, ledger_invariants as L
+RP._PARSER_FILE = __import__("os").path.abspath(L.__file__)
+RP._FACES = RP.load_faces(RP._PARSER_FILE)
+L.json = RP._JsonShim(json)
+with contextlib.redirect_stdout(io.StringIO()):
+    old, L.OUTJSON = L.OUTJSON, "/tmp/reader_paths_control.json"
+    try: L.main()
+    except SystemExit: pass
+    finally: L.OUTJSON = old
+byface = collections.defaultdict(set)
+for k, path, face in RP.ACCESS:
+    if path: byface[face].add((k, path[0]))
+hit = any("WALK-AWAY" in f and ("event", "event_class") in v for f, v in byface.items())
+print(json.dumps({"names_hidden_gate": hit, "faces": len(byface)}))
+""",
+        probe=lambda r: r.get("names_hidden_gate") is True and (r.get("faces") or 0) > 5,
+    ),
 ]
 
 

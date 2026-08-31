@@ -55,6 +55,17 @@ python3 "$HERE/reader_controls.py"
 RC_RC=$?
 set -e
 
+# Reader-path census (2026-08-31). Prints the DENOMINATOR this layer never had: how many keys
+# arc emits that nothing reads, and how many field-reads reach a face only through a helper the
+# face never names — the column bite 7 lived in (a correct write and a correct read separated by
+# a veto reader neither side knew was in the path). Print-only, rc never consulted: it is a
+# census, and deciding which zero is a defect is a human judgement. ~10s, so PATHS_SKIP=1 skips
+# it on a hurried morning; the cost is the traced parser run, not the printing.
+if [ "${PATHS_SKIP:-0}" != 1 ]; then
+  echo "== reader paths (census)"
+  python3 "$HERE/reader_paths.py" --summary || true
+fi
+
 # Recon face (spark #48, 2026-08-16): transient channel over tracked EXTERNAL primaries
 # (launch/sources.jsonl). Print-only, rc deliberately not consulted — an edit on someone
 # else's website must never flip the audit rc, which speaks only about the decision record.
