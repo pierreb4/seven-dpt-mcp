@@ -46,6 +46,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 A = os.path.expanduser(os.environ.get("LEDGER_A", "~/projects/arc-agi-3/launch/prior-ledger.jsonl"))
 B = os.path.expanduser(os.environ.get("LEDGER_B", "~/projects/launch/prior-ledger.jsonl"))
 VERBOSE = "--verbose" in sys.argv
+# CONTROLS_FAST=1 skips controls tagged `slow` — used by the pre-push hook, where the whole
+# suite is ~17s and ONE control (the reader-path census regression) is 12s of it. The daily
+# sweep runs everything. Skipped controls are ANNOUNCED, never silently dropped: a suite that
+# quietly runs fewer checks than its banner implies is the pinned-green shape one level up.
+FAST = os.environ.get("CONTROLS_FAST") == "1"
 
 # ── the planted specimens ────────────────────────────────────────────────────
 # Each control: what is planted, and what the faces MUST say about it. `expect` is the
@@ -340,6 +345,7 @@ print(json.dumps({"inv": bool(L.is_declined(line)), "cal": bool(C.is_declined(li
     ),
     dict(
         name="reader-path census names the known hidden gate",
+        slow=True,   # runs the tracer over the whole ledger: ~12s, most of the suite's cost
         why="Regression control on the instrument built to find bite 7. The UNPRICED WALK-AWAY "
             "face names outcome/resolution/result/status in its own source but ALSO reads "
             "`event`, via event_class — the veto reader that discarded arc's correct "
@@ -429,7 +435,10 @@ def main():
         elif VERBOSE:
             print(f"        {c['why']}")
 
+    skipped = 0
     for c in VOCAB_CONTROLS:
+        if FAST and c.get("slow"):
+            skipped += 1; continue
         try: ok = bool(c["probe"](run_vocab(c)))
         except Exception as e: ok = False
         print(f"  {'ok  ' if ok else 'FAIL'} {c['name']}")
@@ -438,7 +447,9 @@ def main():
         elif VERBOSE: print(f"        {c['why']}")
 
     n_x = sum(1 for c in CONTROLS if c["expect"] == "xfail")
-    print(f"\n  {len(CONTROLS) + len(VOCAB_CONTROLS) - len(bad)}/{len(CONTROLS) + len(VOCAB_CONTROLS)} as declared"
+    if skipped:
+        print(f"  ....  {skipped} slow control(s) SKIPPED (CONTROLS_FAST=1) — not run, not passing")
+    print(f"\n  {len(CONTROLS) + len(VOCAB_CONTROLS) - skipped - len(bad)}/{len(CONTROLS) + len(VOCAB_CONTROLS) - skipped} as declared"
           f"  ({n_x} tracked blind spot(s) — see --verbose)")
     if bad:
         print("  A reader stopped behaving as declared. Either it lost the ability to see a")

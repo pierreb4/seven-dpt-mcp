@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# pre-push — run the audit layer's own gate before anything reaches the PUBLIC remote.
+#
+# WHY THIS AND NOT A THIRD-PARTY GATE (2026-08-31). `no-mistakes` was assessed and declined on
+# FIT: this repo has 0 PRs ever and no CI, so two of its seven stages are inapplicable; its
+# test stage would only re-wrap this script; and its document/lint stages auto-fix up to 3
+# times, pointed at `analysis/` — which IS the auditor. An AI silently rewriting the instrument
+# that audits arc's ledger is the one edit this repo cannot afford. This hook captures the
+# cited benefit (defects that only appear when the code is RUN) at zero supply-chain cost and
+# is removed with one `rm`.
+#
+# RC SEMANTICS, and getting these backwards would make the hook either useless or hated:
+#   0 = clean
+#   1 = ALERTS PRESENT. A standing state, not a defect — there are normally 2 live alerts.
+#       Never blocks. A hook that blocks on the normal morning state gets bypassed forever.
+#   2 = a face contradicts another face (self_check), or a reader LOST THE ABILITY TO DISSENT
+#       (reader_controls). Neither is ever a standing state. Blocks.
+# A parser CRASH also surfaces at rc=2 — not via the invariants exit code, which is 1 for both
+# "alerts" and "traceback", but because reader_controls gets no JSON back and its probes fail.
+# That is the path by which today's UnboundLocalError class is caught mechanically; verified by
+# breaking the parser on purpose and watching this hook block.
+#
+# The census and the sources recon are SKIPPED here: both are print-only (exit 0 always), the
+# census costs ~10s of the ~14s, and sources_diff hits the network, which has no business in a
+# push path. Gate value is unchanged; the sweep is ~4s.
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 0
+
+echo "pre-push: analysis/sweep_composite.sh (CONTROLS_FAST=1 PATHS_SKIP=1 SOURCES_SKIP=1)"
+CONTROLS_FAST=1 PATHS_SKIP=1 SOURCES_SKIP=1 bash analysis/sweep_composite.sh
+rc=$?
+
+if [ "$rc" -ge 2 ]; then
+  echo
+  echo "PUSH BLOCKED (rc=$rc)."
+  echo "  Either two faces disagree about what happened, or a reader can no longer dissent."
+  echo "  Whichever it is, the program is wrong once — fix it before publishing."
+  echo "  Deliberate override: git push --no-verify"
+  exit 1
+fi
+[ "$rc" -eq 1 ] && echo "pre-push: alerts present (rc=1) — standing state, not a block."
+echo "pre-push: OK"
+exit 0
