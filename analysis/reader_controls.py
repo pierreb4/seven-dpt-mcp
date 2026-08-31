@@ -91,6 +91,23 @@ CONTROLS = [
         probe=lambda t, inv: any("PC-collide" in a for a in inv.get("alerts") or []),
     ),
     dict(
+        name="acknowledgement on a NON-`note` field stands the specimen down",
+        why="The 8th bite, on a reader that had just been fixed. `_ack_tokens` was corrected "
+            "from SUBSTRING to TOKEN matching earlier the same day and left SINGLE-FIELD "
+            "(`note`); arc then acknowledged searchsolver-probe on a field called "
+            "`specimen_ack` and the alert kept firing — correct write, correct token "
+            "discipline, wrong field. Two axes on one reader, fixed hours apart. This control "
+            "pins the second axis so the next declaration field (arc has already used "
+            "`dead_semantics`, `void_exclusion`, `specimen_ack`) does not reopen it.",
+        expect="pass",
+        plant=[{"ts": "2026-08-31T14:00:00Z", "id": "PC-ackfield-draw", "kind": "hidden-draw",
+                "note": "synthetic control: unpriced draw"},
+               {"ts": "2026-08-31T14:01:00Z", "id": "kind-dialect-semantics-PC3",
+                "kind": "scoring-note", "note": "Unrelated prose that names no specimen.",
+                "specimen_ack": "Acknowledging PC-ackfield-draw as a known unscoreable specimen."}],
+        probe=lambda t, inv: not any("PC-ackfield-draw" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
         name="undeclared kind token ALERTs",
         why="The closed-vocabulary tripwire — the one remedy in this layer that has held "
             "since it was built. Controlled so it stays held.",
@@ -192,6 +209,57 @@ CONTROLS = [
         plant=[{"ts": "2026-08-31T12:04:00Z", "id": "PC-miscarried", "kind": "eval",
                 "outcome": "withdrawn", "note": "synthetic: walk-away on the wrong carrier"}],
         probe=lambda t, inv: any("PC-miscarried" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="calibration word on a NEVER-REGISTERED id ALERTs",
+        why="dialect-7-scope's load-bearing invariant: a verdict with no prior behind it "
+            "grades nothing, so the line reads like a resolution and scores on no face.",
+        expect="pass",
+        plant=[{"ts": "2026-08-31T13:00:00Z", "id": "PC-genus-unpriced", "kind": "eval",
+                "outcome": "cleared", "note": "synthetic: calibration word, never priced"}],
+        probe=lambda t, inv: any("PC-genus-unpriced" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="REGISTER-THEN-REFUSE does NOT fire",
+        why="THE GUARD ON THE INVARIANT WE REFUSED TO WIRE. Arc's paired rule — 'a walk-away "
+            "word on a PRICED id fires' — has 20 historical hits that are register-then-refuse "
+            "WORKING AS DESIGNED: 14 of the 16 ids on the DECLINED face carry a prior, and RTR "
+            "(2026-08-17) requires pricing first and refusing second. Wiring it would outlaw "
+            "arc's own protocol. This control is what makes that refusal durable rather than a "
+            "comment: if a later reader 'completes' the pair, this goes red immediately.",
+        expect="pass",
+        plant=[{"ts": "2026-08-31T13:01:00Z", "id": "PC-rtr", "kind": "ab", "prior": 0.35,
+                "why": "synthetic control: priced first, per register-then-refuse"},
+               {"ts": "2026-08-31T13:02:00Z", "id": "PC-rtr", "kind": "resolution",
+                "resolution": "refused", "note": "synthetic: correctly refused AFTER pricing"}],
+        probe=lambda t, inv: not any("PC-rtr" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="`void` on an unpriced id does NOT fire",
+        why="Guards the one refinement made to arc's rule. Arc named cleared/failed/void; "
+            "`void` is excluded because on an unpriced line it scores nothing by construction, "
+            "and including it fires 4 alerts whose only remedy is retro-pricing — which arc's "
+            "own 08-24 peek prohibition forbids. If someone restores `void` to the tuple, this "
+            "control says so.",
+        expect="pass",
+        plant=[{"ts": "2026-08-31T13:03:00Z", "id": "PC-void-unpriced", "kind": "eval",
+                "outcome": "void", "note": "synthetic: void on an unpriced line is legal"}],
+        probe=lambda t, inv: not any("PC-void-unpriced" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="every STANDING line is inside the tail -40 view",
+        why="The sweep reads `| tail -40` and invariants prints ~170 lines, so a standing fact "
+            "emitted at its own face lands ~140 lines from the bottom and is not in the view "
+            "at all. Recorded as a decay class on 2026-08-29 and fixed for the stop-rule trip "
+            "ONLY — the two acknowledged-specimen prints were left behind and a third was "
+            "added on 2026-08-31 before anyone noticed. Three instances of a rule that was "
+            "already written down is what a prose rule is worth; this makes it executable.",
+        expect="pass",
+        plant=[],
+        probe=lambda t, inv: all(
+            (len(t.rstrip().split("\n")) - i) <= 40
+            for i, ln in enumerate(t.rstrip().split("\n"))
+            if ln.startswith("STANDING")),
     ),
     dict(
         name="walk-away declared ONLY in `note`",

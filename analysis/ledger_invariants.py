@@ -508,14 +508,34 @@ def kind_tokens(l):
 # ALERTS as a fresh specimen instead of silently standing.
 _ACK_SPLIT = re.compile(r"[^A-Za-z0-9_.-]+")
 
+# Structural keys on a declaration line: they carry bookkeeping, not specimen names.
+_ACK_SKIP = {"id", "kind", "ts", "amends"}
+
 def _ack_tokens(lines):
-    """Id-shaped tokens named on the dialect's own declaration lines."""
+    """Id-shaped tokens named ANYWHERE on the dialect's own declaration lines.
+
+    2026-08-31, the 8th bite and the same class as the other seven — on a reader that had
+    just been fixed. This lexer was corrected from SUBSTRING to TOKEN matching earlier the
+    same day and left SINGLE-FIELD (`note`). Arc then acknowledged searchsolver-probe on a
+    field called `specimen_ack`, said so, and the alert kept firing: correct write, correct
+    token discipline, wrong field. Two axes on one reader, fixed one at a time, a few hours
+    apart — which is the whole lesson of this arc restated in miniature.
+
+    Widening is safe HERE in a way it was not for verdict carriers: a kind-dialect-semantics
+    line exists ONLY to declare and acknowledge, so every field on it is acknowledgement
+    prose, whereas `criterion` and `void_conditions` on an ordinary line carry CONDITIONAL
+    heads that would have scored as verdicts. Measured before wiring: reading every field
+    adds exactly two ids — memseed-draw1 (named in `dead_semantics`) and searchsolver-probe
+    (named in `specimen_ack`) — both genuine, none spurious.
+    WHICH FIELDS THIS TRUSTS: all of them except the structural keys in _ACK_SKIP."""
     toks = set()
     for l in lines:
         if not str(l.get("id", "")).startswith("kind-dialect-semantics"): continue
-        for t in _ACK_SPLIT.split(str(l.get("note", "") or "")):
-            t = t.strip(".,;:")
-            if t: toks.add(t)
+        for k, v in l.items():
+            if k in _ACK_SKIP: continue
+            for t in _ACK_SPLIT.split(str(v or "")):
+                t = t.strip(".,;:")
+                if t: toks.add(t)
     return toks
 
 
@@ -1339,17 +1359,32 @@ def main():
     # because that is where verdicts "go" — which files an unpriced non-event alongside
     # graded forecasts and lets it read as a resolution that simply did not score.
     #
-    # ONLY THE `outcome` HALF IS WIRED, DELIBERATELY. The mirror rule (a calibration verdict
-    # on `result` belongs on `outcome`) COLLIDES WITH DIALECT-2: `result_field()` exists
-    # because arc declared 2026-08-18 that "classing rides the `result` word" on resolution
-    # lines, and 17 priced lines on the live ledger carry cleared/failed/void on `result` as
-    # correct practice. Forward-dating would only delay the collision, not resolve it, so
-    # that half is an OPEN QUESTION back to arc rather than a rule we inferred. Stated here
-    # so a later reader does not "complete" the symmetry and fire on 17 good lines.
+    # THE MIRROR RULE IS DECLARED WRONG — DO NOT "COMPLETE" THE SYMMETRY. We reported the
+    # dialect-2 collision (17 priced lines carry cleared/failed/void on `result` as correct
+    # practice) and arc answered with kind-dialect-semantics-7-scope (line 480, 6c0645a):
+    # dialect-7 was OVER-BOUND TO FIELD NAMES. The normative content is the WORD-GENUS x
+    # REGISTRATION pairing; the field choice between `outcome` and `result` is STYLE, not
+    # semantics. Dialect-2 STANDS, both carriers are legal, neither supersedes, and no
+    # pre/post gate is needed. This check survives as narrow hygiene (arc: "keep it if it's
+    # already positive-controlled" — it is), but the load-bearing invariant is the genus x
+    # registration pair below.
     # Gate is FILE POSITION of the declaring line, never its ts (dialect-3/5 standing rule).
     _d7 = next((n for n, l in enumerate(lines)
                 if l.get("id") == "kind-dialect-semantics-7"), None)
     _priced_ids = {l.get("id") for l in lines if prior_of(l) is not None}
+    # Hoisted 2026-08-31: whole-ledger facts used by FOUR faces (carrier-legality, genus x
+    # registration, unpriced-draw, ts-disorder). It was assigned at the unpriced-draw face and
+    # the genus check — added above it — raised UnboundLocalError on the first run. Caught by
+    # running, not by reading; one assignment now, so a later face cannot use it before it exists.
+    _ack_toks = _ack_tokens(lines)
+    # STANDING lines are COLLECTED, not printed where they are computed. The sweep view is
+    # `| tail -40` and this file is 170 lines of output: an acknowledged-specimen line printed
+    # at its own face lands ~140 lines from the bottom and is not in the view at all. That
+    # decay was recorded on 2026-08-29 and fixed for the stop-rule trip only — the two
+    # acknowledged-specimen prints (unpriced-draw, ts-disorder) were left where they were, and
+    # the genus line added today made a third. A standing fact promised "printed every sweep"
+    # that prints where the view no longer reaches is not printed.
+    standing = []
     miscarried = []
     if _d7 is not None:
         for n, l in enumerate(lines):
@@ -1359,6 +1394,66 @@ def main():
             if w.startswith(("withdrawn", "refused", "declined")):
                 miscarried.append({"id": l.get("id"), "word": w.split()[0], "line": n + 1})
     out["carrier_legality_violations"] = miscarried
+
+    # ── GENUS x REGISTRATION (kind-dialect-semantics-7-scope, arc 2026-08-31, line 480) ──
+    # Arc named two cross-carrier invariants as the load-bearing pair. ONE IS WIRED. Both were
+    # measured against the live ledger BEFORE wiring — the standing habit of checking a
+    # declared rule against history rather than trusting it has no scope.
+    #
+    #   NOT WIRED — "a walk-away word on a PRICED id fires": 20 historical hits, and they are
+    #   REGISTER-THEN-REFUSE WORKING AS DESIGNED. 14 of the 16 ids on the DECLINED face carry
+    #   a prior; that face's whole question is "were we right to walk away from bets we RATED
+    #   WELL?", and RTR (adopted 2026-08-17) *requires* pricing first and refusing second. As
+    #   stated the rule would outlaw arc's own protocol and fire on every correct refusal, so
+    #   it is reported back rather than executed — the same call as the dialect-2 mirror, one
+    #   round later. ARC RETRACTED IT: kind-dialect-semantics-8 (line 481, 3f22e28) adopts the
+    #   report verbatim — registration governs whether a CALIBRATION word is legal and says
+    #   nothing about a walk-away word, because a priced arm is exactly the thing you are
+    #   allowed to walk away from. The retraction line endorses the REGISTER-THEN-REFUSE-does-
+    #   NOT-fire control BY NAME so no later reader re-derives (A) from dialect-7-scope's text.
+    #
+    #   WIRED, WITH ONE REFINEMENT — "a calibration word on a NEVER-REGISTERED id fires",
+    #   restricted to the SCORING verdicts cleared/failed. `void` is excluded deliberately: on
+    #   an unpriced line it scores nothing by construction, so it cannot pollute the curve, and
+    #   including it fires 4 more alerts whose only remedy would be retro-pricing — which arc's
+    #   own 08-24 peek prohibition forbids. With void excluded there are exactly 2 live
+    #   specimens, so the alert is about the NEXT one.
+    # Acknowledged-specimen discipline applies (as on the unpriced-draw face): an id named on
+    # a kind-dialect-semantics line prints STANDING; only fresh specimens ALERT.
+    CAL_SCORING = ("cleared", "failed")
+    genus_viol = []
+    for n, l in enumerate(lines):
+        i = l.get("id")
+        if not i or i in _priced_ids: continue
+        for f in ("outcome", "resolution", "result"):
+            if f == "result" and result_field(l) is None: continue
+            w = str(l.get(f) or "").strip().lower()
+            head = w.split()[0].strip(".,;:—-*") if w else ""
+            if head.startswith(CAL_SCORING):
+                genus_viol.append({"id": i, "field": f, "word": head, "line": n + 1})
+                break
+    out["genus_registration_violations"] = genus_viol
+    if genus_viol:
+        _gack = [r for r in genus_viol if r["id"] in _ack_toks]
+        _gfresh = [r for r in genus_viol if r["id"] not in _ack_toks]
+        if _gack:
+            standing.append("STANDING genus x registration: acknowledged unscoreable "
+                            "(dialect-7-scope: a calibration verdict needs a prior behind it "
+                            "to grade) — "
+                            + ", ".join(f"{r['id']} ('{r['word']}')" for r in _gack)
+                            + ". New unacknowledged specimens still ALERT.")
+        if _gfresh:
+            alerts.append(
+                "ALERT genus-registration: "
+                + ", ".join(f"{r['id']} ('{r['word']}' on `{r['field']}`, line {r['line']})"
+                            for r in _gfresh)
+                + " — kind-dialect-semantics-7-scope: calibration-genus words are legal only "
+                  "on REGISTERED ids, because a verdict with no prior behind it grades "
+                  "nothing. The line READS like a resolution and scores on no face. "
+                  "Unscoreable forever — pricing now would be outcome-contaminated — so this "
+                  "is for the NEXT one: price it at registration, or resolve it in walk-away "
+                  "vocabulary. Acknowledge on a kind-dialect-semantics line to stand it down")
+
     if miscarried:
         alerts.append(
             "ALERT carrier-legality: "
@@ -1585,7 +1680,7 @@ def main():
     # declaration vehicle (arc's ask-first channel — e21349b, c1069e7, dialect-3 7c64878)
     # has ruled on it, so it prints as a standing fact; the ALERT form is reserved for
     # specimens the dialect has not seen.
-    _ack_toks = _ack_tokens(lines)
+    # (_ack_toks is computed once near the top of main() — see the hoist note there)
     DRAW_KINDS = {"submission", "hidden-draw"}
     updraws = []
     for pid in dict.fromkeys(l.get("id") for l in lines if l.get("id")):
@@ -1599,8 +1694,9 @@ def main():
         _acked = [i for i in updraws if i in _ack_toks]
         _fresh = [i for i in updraws if i not in _ack_toks]
         if _acked:
-            print(f"\nUNPRICED DRAW  acknowledged unscoreable (dialect-3: draws are priced"
-                  f" BEFORE the submit click; no retro-prior): {', '.join(_acked)}")
+            standing.append("STANDING unpriced draw: acknowledged unscoreable (dialect-3: "
+                            "draws are priced BEFORE the submit click; no retro-prior) — "
+                            + ", ".join(_acked) + ". New specimens still ALERT.")
         if _fresh:
             alerts.append(
                 f"ALERT unpriced-draw: {', '.join(_fresh)} — measurement draw(s) (kind "
@@ -1684,9 +1780,11 @@ def main():
         _acked = [r for r in ts_disorder if r["id"] in _ack_toks]
         _fresh = [r for r in ts_disorder if r["id"] not in _ack_toks]
         if _acked:
-            print(f"TS-DISORDER  acknowledged day-typos (dialect-3: ts is a nominal label;"
-                  f" file order, then git blame, is the clock): "
-                  + ", ".join(f"{r['id']} ({r['ts']} vs {r['after']})" for r in _acked))
+            standing.append("STANDING ts-disorder: acknowledged day-typos (dialect-3: ts is "
+                            "a nominal label; file order, then git blame, is the clock) — "
+                            + ", ".join(f"{r['id']} ({r['ts']} vs {r['after']})"
+                                        for r in _acked)
+                            + ". New specimens still ALERT.")
         if _fresh:
             named = ", ".join(f"{r['id']} ({r['ts']} after {r['after']})" for r in _fresh)
             alerts.append(
@@ -1937,6 +2035,7 @@ def main():
               "phrasing. Either the dialect moved under the rule (re-key it on the field "
               "that now carries the fact) or it was written against a phrasing that never "
               "existed (delete it). A rule nothing matches is not a passing check")
+    for _sl in standing: print(_sl)
     for a in alerts: print(a)
     if not alerts: print("no alerts.")
     if "--json" in argv:
