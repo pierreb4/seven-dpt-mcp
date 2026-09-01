@@ -717,13 +717,24 @@ def _acks(lines):
     string would silently acknowledge nothing while looking correct, and one id spelt as a
     string is the most likely way this gets written wrong.
     """
-    out = {}
+    # LATEST-WINS PER DECLARING ID (2026-09-01, the third time today this is the answer). An
+    # acknowledgement can go stale: sharpen a check and ids it used to flag stop being
+    # specimens, leaving a stand-down that silences nothing — the phantom class, at scale.
+    # Append-only means the line cannot be withdrawn, so the ONLY available correction is to
+    # restate it, exactly as dialect-3 already resolves 153 of 234 ids and as the kind-dialect
+    # fix now honours. A later line with the SAME id REPLACES its predecessor's list; an empty
+    # `acknowledges` retires the acknowledgement entirely. Distinct ids never interact, so two
+    # unrelated acknowledgements of the same class both stand.
+    latest = {}
     for l in lines:
         cls = str(l.get("alert_class") or "").strip()
         ids = l.get("acknowledges")
         if not cls or not isinstance(ids, list): continue
+        latest[str(l.get("id") or "")] = (cls, ids)      # file order = authority
+    out = {}
+    for did, (cls, ids) in latest.items():
         for i in ids:
-            out.setdefault(cls, {}).setdefault(str(i), []).append(str(l.get("id") or ""))
+            out.setdefault(cls, {}).setdefault(str(i), []).append(did)
     return out
 
 
@@ -2420,12 +2431,44 @@ def main():
     # silent-no-match this layer exists for, on the one field where silence is never safe.
     # `status` is excluded: arc uses it for prose by design and only its WITHDRAWN head is
     # read, so demanding a declared word there would fire on correct practice.
+    # An id is a specimen only if NO line of it carries a declared disposition on ANY carrier —
+    # `resolution` INCLUDED. The first cut read outcome/result only and claimed the specimens
+    # "score on NO face"; 9 of its 16 carried a declared word on `resolution` and scored
+    # perfectly well (animfeedback-floorsafety-draw1 `resolution: cleared` alongside `outcome:
+    # passed-the-harm-gate`, which is dialect-7-scope's field-choice-is-style working as
+    # designed — declared word on one carrier, colour on another). That is the read-ONE-carrier
+    # bug this file's own comments record biting three separate functions, biting a fourth, in
+    # the check written to catch unread carriers. Caught by verifying arc's acknowledgement
+    # rather than accepting it, which is the only reason it did not become 16 permanent
+    # stand-downs resting on a false sentence.
+    _ALL_CARRIERS = CARRIERS_DECLARED + ("resolution",)
+
+    def _declared_anywhere(iid):
+        for l in _byid.get(iid, ()):
+            for f in _ALL_CARRIERS:
+                h = _head_word(l.get(f))
+                if h and (h in OUTCOME_DECLARED or (set(h.split("-")) & set(OUTCOME_DECLARED))):
+                    return True
+        return False
+
+    # Two exclusions, both measured on the survivors rather than reasoned in advance.
+    # IN-FLIGHT ids: an open bet legitimately has no disposition yet — that is what in-flight
+    #   MEANS — so flagging one for lacking a declared disposition word is the check restating
+    #   its own precondition as a defect. `baseline-shift` (result: 'partial', still open) was
+    #   the specimen that showed this.
+    # NON-WORD heads: `(1)` and `1` are prose that happens to start a `result` field, not
+    #   vocabulary items. A head with no letter in it cannot be a word this or any reader was
+    #   ever going to recognise, so demanding it be declared is a rule about punctuation.
+    _inflight_ids = {r["id"] for r in inflight}
     undisp = []
     for n, l in enumerate(lines, 1):
         for f in CARRIERS_DECLARED[:2]:               # outcome, result — NOT status
             h = _head_word(l.get(f))
             if not h or h in OUTCOME_DECLARED: continue
+            if not any(c.isalpha() for c in h): continue             # prose, not vocabulary
             if set(h.split("-")) & set(OUTCOME_DECLARED): continue   # declared token + suffix
+            if _declared_anywhere(l.get("id")): continue   # the id IS disposed, elsewhere
+            if l.get("id") in _inflight_ids: continue      # open bets are not yet disposed
             undisp.append({"id": l.get("id"), "field": f, "head": h, "line": n})
     if undisp:
         _ud_live, _ud_ack = _ack_split("undeclared-disposition",
@@ -2442,7 +2485,9 @@ def main():
                 f"ALERT undeclared-disposition: {len(_ud_live)} id(s) carry a head word on "
                 f"`outcome`/`result` with no declared disposition token — "
                 + ", ".join(f"{i} ({_det[i]})" for i in _ud_live)
-                + ". The line reads as a verdict and scores on NO face. Declare the word in "
+                + ". No line of these ids carries a declared disposition on ANY carrier "
+                  "(outcome/result/status/resolution), so the word reads as a verdict to a "
+                  "human and is the id's ONLY disposition. Declare the word in "
                   f"OUTCOME_DECLARED {edit_sites('OUTCOME_DECLARED')} if it is a real "
                   "disposition, restate the line on a declared word if it is not, or "
                   "acknowledge the id under alert_class 'undeclared-disposition' if the line "

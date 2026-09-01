@@ -288,6 +288,27 @@ CONTROLS = [
             for a in inv.get("alerts") or []),
     ),
     dict(
+        name="a RESTATED acknowledgement supersedes its predecessor",
+        why="2026-09-01. An acknowledgement goes stale when the check it answers is sharpened: "
+            "ids that used to be specimens stop being them, and the stand-down silences nothing "
+            "— the phantom class, at the scale of a whole class rather than one range. It "
+            "happened within the hour: adding `resolution` to the carriers this reader consults "
+            "took undeclared-disposition from 16 specimens to 0, stranding all 16 "
+            "acknowledgements. Append-only means the line cannot be withdrawn, so restatement "
+            "is the only correction that exists — the same answer as the kind-dialect fix and "
+            "the same one dialect-3 already gives 153 of 234 ids. An empty array retires it.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T12:00:00Z", "id": "PC-uwack-restated", "kind": "desk", "result": "withdrawn", "note": "synthetic control: walk-away specimen"},
+               {"ts": "2026-09-01T14:00:00Z", "id": "PC-restate-ack", "kind": "scoring-note",
+                "alert_class": "unpriced-walk-away", "acknowledges": ["PC-uwack-restated"],
+                "note": "synthetic control: the original acknowledgement"},
+               {"ts": "2026-09-01T14:01:00Z", "id": "PC-restate-ack", "kind": "scoring-note",
+                "alert_class": "unpriced-walk-away", "acknowledges": [],
+                "amends": "PC-restate-ack",
+                "note": "synthetic control: retired — the id is no longer a specimen"}],
+        probe=lambda t, inv: any("PC-uwack-restated" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
         name="INERT ts-correction range ALERTs",
         why="2026-09-01. A `ts-correction-<a>-<b>` id silences future-ts for that line range and "
             "nothing ever asked whether the range held a specimen. Arc acknowledged a +10-minute "
