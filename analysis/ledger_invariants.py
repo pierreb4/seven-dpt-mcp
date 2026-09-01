@@ -585,6 +585,90 @@ def _ack_tokens(lines):
     return {t: sorted(d) for t, d in toks.items()}
 
 
+# ── STRUCTURED ALERT ACKNOWLEDGEMENT (arc's dialect-11, 2026-09-01) ──────────
+# The prose channel above is keyed on ids appearing ANYWHERE on a declaration line. It works,
+# and it is still a phrasing-keyed read: it cannot say WHICH alert an id was acknowledged
+# for, so an acknowledgement of one class silences that id everywhere. dialect-11 replaces it
+# for whole-class stand-downs with two fields — `alert_class` naming the check, `acknowledges`
+# an array of exact ids.
+#
+# Its first use carried a key that did not match the check it named (`unpriced-walkaway` vs
+# this file's `unpriced-walk-away`). A straight equality match would have stood down nothing
+# while both parties believed the class acknowledged — a phrasing-keyed read with a silent
+# no-match, inside the channel built to escape phrasing-keyed reads. The remedy is NOT lenient
+# matching (normalising hyphens is fuzzy matching, which is the original disease and makes
+# every future near-miss invisible); it is a CLOSED vocabulary, exactly as `kind` has.
+_ALERT_RX = re.compile(r"ALERT ([a-z0-9-]+):")
+
+
+def alert_classes():
+    """The closed vocabulary of alert-class names, READ OFF THE CHECKS THEMSELVES.
+
+    Deliberately derived rather than declared. A hand-maintained registry is a second place
+    to state the same fact, and the whole failure genus in this file is two statements of one
+    fact drifting apart — so the set is scanned out of the parsers' own `ALERT <name>:`
+    literals. Add a check and its class is legal the same instant; rename one and the old
+    name stops being legal, which is precisely when an acknowledgement naming it must fail
+    loudly. Same principle as reader_paths.py tracing the real run instead of guessing.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    names = set()
+    for f in _PARSER_FILES:
+        fp = os.path.join(here, f)
+        if os.path.exists(fp):
+            names |= set(_ALERT_RX.findall(open(fp).read()))
+    return names
+
+
+# Classes whose alert site actually CONSULTS the acknowledgement channel. A legal class that
+# is not wired must alert too: an acknowledgement the reader never reads is a stand-down that
+# stands nothing down, and staying quiet about it is the exact silent-no-match this channel
+# exists to end. Wiring a site means adding its name here AND calling _ack_split() there.
+ACK_WIRED = {"unpriced-walk-away", "split-result"}
+
+
+def _overlap(a, b):
+    """Crude shared-character score, ONLY for the did-you-mean hint on a rejected key.
+
+    Never used to MATCH — matching stays exact, because lenient matching is the disease. This
+    exists so a rejected key comes with the right answer attached instead of sending the
+    writer back to guess again.
+    """
+    return len(set(a.split("-")) & set(b.split("-"))) * 10 + len(set(a) & set(b))
+
+
+def _acks(lines):
+    """{alert_class: {id: [declaring line ids]}} from dialect-11's two fields.
+
+    WHICH FIELDS THIS TRUSTS: `alert_class` (string) and `acknowledges` (array) — nothing
+    else, and no prose. A non-list `acknowledges` is ignored rather than coerced: a bare
+    string would silently acknowledge nothing while looking correct, and one id spelt as a
+    string is the most likely way this gets written wrong.
+    """
+    out = {}
+    for l in lines:
+        cls = str(l.get("alert_class") or "").strip()
+        ids = l.get("acknowledges")
+        if not cls or not isinstance(ids, list): continue
+        for i in ids:
+            out.setdefault(cls, {}).setdefault(str(i), []).append(str(l.get("id") or ""))
+    return out
+
+
+def _ack_malformed(lines):
+    """Lines that MEANT to acknowledge and could not — half the pair, or a non-list array."""
+    bad = []
+    for l in lines:
+        cls, ids = l.get("alert_class"), l.get("acknowledges")
+        if cls is None and ids is None: continue
+        if cls is None or ids is None or not isinstance(ids, list) or not ids:
+            bad.append((str(l.get("id") or "?"),
+                        "no `alert_class`" if cls is None else
+                        "no `acknowledges`" if ids is None else
+                        "`acknowledges` is not a non-empty array"))
+    return bad
+
+
 # ── RULE LIVENESS (2026-08-31) ───────────────────────────────────────────────
 # A phrasing-keyed rule that matches NOTHING cannot fail, so every green it produces is
 # vacuous — it points, and it points away. That is the shape of the most expensive bite in
@@ -1436,8 +1520,25 @@ def main():
     # or because it got ACKNOWLEDGED? Same denominator logic as the reader-path census.
     standdowns = []          # {face, id, via: [declaring ids]}
 
-    def _standdown(face, sid):
-        standdowns.append({"face": face, "id": sid, "via": _ack_toks.get(sid) or []})
+    _ackd = _acks(lines)      # dialect-11 structured acknowledgements: {class: {id: [lines]}}
+
+    def _standdown(face, sid, via=None):
+        standdowns.append({"face": face, "id": sid,
+                           "via": via or _ack_toks.get(sid) or []})
+
+    def _ack_split(cls, ids):
+        """(live, acknowledged) for one alert class, counting every stand-down.
+
+        The counting is the point and not a detail: an acknowledged alert that simply stopped
+        printing would make the alert set shrink for a reason indistinguishable from the
+        record improving. Provenance comes from the declaring line, so the denominator can
+        name WHICH acknowledgement silenced what.
+        """
+        known = _ackd.get(cls) or {}
+        live = [i for i in ids if i not in known]
+        for i in ids:
+            if i in known: _standdown(cls, i, via=sorted(set(known[i])))
+        return live, [i for i in ids if i in known]
     # STANDING lines are COLLECTED, not printed where they are computed. The sweep view is
     # `| tail -40` and this file is 170 lines of output: an acknowledged-specimen line printed
     # at its own face lands ~140 lines from the bottom and is not in the view at all. That
@@ -1721,6 +1822,8 @@ def main():
         fresh = [r for r in unpriced if r["ts"] >= RTR_ADOPTED]
         out["unpriced_walkaway"] = {"ids": [r["id"] for r in unpriced],
                                     "since_adoption": [r["id"] for r in fresh]}
+        _uw_live, _uw_ack = _ack_split("unpriced-walk-away", [r["id"] for r in fresh])
+        fresh = [r for r in fresh if r["id"] in set(_uw_live)]
         if fresh:
             classes = "/".join(sorted({r["classed_as"] for r in fresh}))
             alerts.append(
@@ -1991,6 +2094,8 @@ def main():
                   f"{' (' + ', '.join(halves) + ')' if halves else ''} ·"
                   f" {'prior registered' if has_p else 'NO PREREG — no prior on any half'}")
         unreg = [i for i, _, p in rows if not p]
+        _sr_live, _sr_ack = _ack_split("split-result", unreg)
+        unreg = _sr_live
         if unreg:
             alerts.append(
                 f"ALERT split-result: {', '.join(unreg)} resolved SEVERAL pre-declared questions"
@@ -2146,6 +2251,57 @@ def main():
               "phrasing. Either the dialect moved under the rule (re-key it on the field "
               "that now carries the fact) or it was written against a phrasing that never "
               "existed (delete it). A rule nothing matches is not a passing check")
+    # ── ALERT-CLASS VOCABULARY (dialect-11) ──
+    # Printed EVERY run, because the counterparty has to be able to read the vocabulary off
+    # the machine rather than compose a key from memory — the failure that produced
+    # `unpriced-walkaway`. Three ways an acknowledgement can fail to land, all of them loud:
+    # a class no check emits, a class no site consults, and an id that matches no specimen.
+    _legal = alert_classes()
+    _wired_now = sorted(ACK_WIRED & _legal)
+    print(f"\nALERT CLASSES  {len(_legal)} emitted by the checks · {len(_wired_now)} consult "
+          f"the acknowledgement channel: {', '.join(_wired_now)}")
+    print(f"    copy `alert_class` from this list, never compose it: "
+          f"{', '.join(sorted(_legal))}")
+    if ACK_WIRED - _legal:
+        alerts.append(
+            f"ALERT ack-channel: {', '.join(sorted(ACK_WIRED - _legal))} is wired to consult "
+            "the acknowledgement channel but NO check emits it — the name was renamed or "
+            "removed and ACK_WIRED still names the old one, so acknowledgements written "
+            "against it can never land. Fix ACK_WIRED in ledger_invariants.py")
+    for cls in sorted(_ackd):
+        if cls not in _legal:
+            alerts.append(
+                f"ALERT ack-channel: acknowledgement names alert_class '{cls}', which NO check "
+                f"emits (declared on {', '.join(sorted({d for m in _ackd[cls].values() for d in m}))}) "
+                f"— it stands nothing down and never will. Legal values are printed above; "
+                f"copy one exactly. Nearest by shape: "
+                f"{', '.join(sorted(_legal, key=lambda n: -_overlap(n, cls))[:3])}")
+        elif cls not in ACK_WIRED:
+            alerts.append(
+                f"ALERT ack-channel: alert_class '{cls}' is a real check but its site does not "
+                f"consult the acknowledgement channel, so this acknowledgement is INERT — the "
+                f"alert keeps firing at full strength and nothing is counted. Wire it: add "
+                f"'{cls}' to ACK_WIRED and call _ack_split() at that alert site, both "
+                f"{edit_sites('ACK_WIRED')}")
+    _landed = {}
+    for r in standdowns:
+        _landed.setdefault(r["face"], set()).add(r["id"])
+    for cls in sorted(set(_ackd) & ACK_WIRED & _legal):
+        missed = sorted(set(_ackd[cls]) - _landed.get(cls, set()))
+        if missed:
+            alerts.append(
+                f"ALERT ack-channel: alert_class '{cls}' acknowledges {', '.join(missed)}, which "
+                f"matched NO specimen this sweep — either the id is misspelt, or the defect it "
+                f"named is already gone. An acknowledgement that matches nothing is counted as "
+                f"nothing, which is how a stand-down silently becomes a no-op")
+    out["alert_classes"] = {"legal": sorted(_legal), "wired": _wired_now,
+                            "declared": {c: sorted(m) for c, m in _ackd.items()}}
+    for _bid, _why in _ack_malformed(lines):
+        alerts.append(
+            f"ALERT ack-channel: line {_bid} carries half an acknowledgement ({_why}). Both "
+            "fields are required — `alert_class` naming a check and `acknowledges` as a "
+            "non-empty array of exact ids; one without the other silences nothing")
+
     out["acknowledgement_standdowns"] = standdowns
     if standdowns or alerts:
         _by = {}

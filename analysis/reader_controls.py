@@ -193,6 +193,101 @@ CONTROLS = [
         probe=lambda t, inv: any("synthetic-noamends-kind" in a for a in inv.get("alerts") or []),
     ),
     dict(
+        name="ACKNOWLEDGED alert class stands down, and is COUNTED",
+        why="2026-09-01, arc's dialect-11. Two alerts named a remedy their recipient could not "
+            "perform (5 ids unpriceable under the peek prohibition, one split result already "
+            "resolved), so both would have fired on every sweep forever — which is how an alert "
+            "channel decays into noise. The structured channel ends that. Stand-down, never "
+            "silence: if an acknowledged alert simply stopped printing, the alert set would "
+            "shrink for a reason indistinguishable from the record improving.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T12:00:00Z", "id": "PC-uwack-ack", "kind": "desk", "result": "withdrawn", "note": "synthetic control: unpriced walk-away specimen"},
+               {"ts": "2026-09-01T12:01:00Z", "id": "PC-ack-line", "kind": "scoring-note",
+                "alert_class": "unpriced-walk-away", "acknowledges": ["PC-uwack-ack"],
+                "note": "synthetic control: structured acknowledgement"}],
+        probe=lambda t, inv: (
+            not any("PC-uwack-ack" in a for a in inv.get("alerts") or [])
+            and any(r.get("face") == "unpriced-walk-away" and r.get("id") == "PC-uwack-ack"
+                    and "PC-ack-line" in (r.get("via") or [])
+                    for r in inv.get("acknowledgement_standdowns") or [])),
+    ),
+    dict(
+        name="an id OUTSIDE the acknowledges array still ALERTS",
+        why="Arc's own second limit on dialect-11, and the control that keeps the whole channel "
+            "honest: an acknowledgement discharges the response obligation for the ids it "
+            "NAMES and nothing else. Without this, a single acknowledgement line could quietly "
+            "become a blanket amnesty for a class — the rewarded misuse of every "
+            "acknowledgement rule, which is the next specimen hiding behind the standing line.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T12:00:00Z", "id": "PC-uwack-ack", "kind": "desk", "result": "withdrawn", "note": "synthetic control: unpriced walk-away specimen"}, {"ts": "2026-09-01T12:00:00Z", "id": "PC-uwack-live", "kind": "desk", "result": "withdrawn", "note": "synthetic control: unpriced walk-away specimen"},
+               {"ts": "2026-09-01T12:01:00Z", "id": "PC-ack-line", "kind": "scoring-note",
+                "alert_class": "unpriced-walk-away", "acknowledges": ["PC-uwack-ack"],
+                "note": "synthetic control: acknowledges ONE of the two"}],
+        probe=lambda t, inv: any(
+            "PC-uwack-live" in a and "PC-uwack-ack" not in a
+            for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="UNKNOWN alert_class raises its own alert",
+        why="The historical specimen, replayed verbatim: arc's first dialect-11 line carried "
+            "`unpriced-walkaway` against this file's `unpriced-walk-away`. Under equality "
+            "matching that stands nothing down while both parties believe the class "
+            "acknowledged — a phrasing-keyed read with a silent no-match, inside the channel "
+            "built to escape phrasing-keyed reads. The fix is a closed vocabulary, NOT lenient "
+            "matching: normalising the hyphen would make every future near-miss invisible.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T12:02:00Z", "id": "PC-badkey", "kind": "scoring-note",
+                "alert_class": "unpriced-walkaway", "acknowledges": ["PC-whatever"],
+                "note": "synthetic control: composed key, off by one hyphen"}],
+        probe=lambda t, inv: any(
+            "ack-channel" in a and "unpriced-walkaway'" in a and "NO check" in a
+            for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="a REAL but UNWIRED alert_class is reported INERT",
+        why="The third way an acknowledgement fails to land, and the least visible: the class "
+            "exists, the key is spelt right, and the alert site simply never consults the "
+            "channel. Nothing is wrong with the ledger, so a quiet reader would leave the "
+            "writer believing a stand-down happened while the alert fires at full strength. "
+            "An acknowledgement the reader never reads must be as loud as one that is misspelt.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T12:03:00Z", "id": "PC-unwired", "kind": "scoring-note",
+                "alert_class": "ts-disorder", "acknowledges": ["PC-whatever"],
+                "note": "synthetic control: legal class, site not wired"}],
+        probe=lambda t, inv: any(
+            "ack-channel" in a and "ts-disorder" in a and "INERT" in a
+            for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="HALF an acknowledgement alerts rather than passing quietly",
+        why="`alert_class` without `acknowledges` looks like an acknowledgement to a human "
+            "reader and is invisible to the parser — the absent-vs-unread conflation this "
+            "whole layer exists for, arriving in the acknowledgement channel itself. A "
+            "non-list `acknowledges` is the same defect: one id written as a bare string "
+            "silences nothing while reading correctly.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T12:04:00Z", "id": "PC-halfack", "kind": "scoring-note",
+                "alert_class": "unpriced-walk-away",
+                "note": "synthetic control: no `acknowledges` array"}],
+        probe=lambda t, inv: any(
+            "ack-channel" in a and "PC-halfack" in a and "half an acknowledgement" in a
+            for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="an acknowledged id matching NO specimen alerts",
+        why="The last silent path: correct class, correct shape, and an id that matches nothing "
+            "— a typo in the id, or a defect already gone. It stands nothing down and counts as "
+            "nothing, so without this the acknowledgement is a no-op that looks discharged in "
+            "the record. Every other way of getting this wrong is loud; this one has to be too.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T12:05:00Z", "id": "PC-ghostack", "kind": "scoring-note",
+                "alert_class": "unpriced-walk-away", "acknowledges": ["PC-no-such-id"],
+                "note": "synthetic control: acknowledges an id that does not exist"}],
+        probe=lambda t, inv: any(
+            "ack-channel" in a and "PC-no-such-id" in a and "matched NO specimen" in a
+            for a in inv.get("alerts") or []),
+    ),
+    dict(
         name="alert remedies name the REAL edit sites",
         why="Three alerts told the operator to 'extend X in BOTH parsers'. Two were stale — the "
             "OUTCOME_DECLARED one within hours of that constant being single-sourced, the "
