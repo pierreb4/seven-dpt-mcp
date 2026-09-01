@@ -739,16 +739,37 @@ def _acks(lines):
 
 
 def _ack_malformed(lines):
-    """Lines that MEANT to acknowledge and could not — half the pair, or a non-list array."""
+    """Lines that MEANT to acknowledge and could not — half the pair, or a non-list array.
+
+    THE EMPTY ARRAY IS THE RETIREMENT FORM, NOT A DEFECT — but only where there is something
+    to retire. This guard was written with the dialect-11 channel and the restatement mechanism
+    arrived hours later; nothing reconciled them, so `_acks` treated `acknowledges: []` as a
+    valid retirement while this function called the same line malformed. Two readers in ONE
+    file disagreeing about one word, which is mechanism (ii) of the class this file exists to
+    catch, committed by its author on the day he wrote the taxonomy down. Arc hit it following
+    the retirement spec verbatim and declined to work around it — correctly: dropping
+    `alert_class` to dodge the guard would have traded a loud disagreement for a silent one.
+
+    So an empty array is legal exactly when a PRIOR line with the same id carried a non-empty
+    one. A bare empty acknowledgement with no history still alerts: it retires nothing and is
+    indistinguishable from a half-written line, which is the case this guard was built for.
+    """
+    prior_nonempty = set()
     bad = []
     for l in lines:
+        did = str(l.get("id") or "?")
         cls, ids = l.get("alert_class"), l.get("acknowledges")
         if cls is None and ids is None: continue
-        if cls is None or ids is None or not isinstance(ids, list) or not ids:
-            bad.append((str(l.get("id") or "?"),
-                        "no `alert_class`" if cls is None else
-                        "no `acknowledges`" if ids is None else
-                        "`acknowledges` is not a non-empty array"))
+        if isinstance(ids, list) and ids and cls is not None:
+            prior_nonempty.add(did); continue
+        if isinstance(ids, list) and not ids and cls is not None and did in prior_nonempty:
+            continue                                   # RETIREMENT — see the note above
+        bad.append((did,
+                    "no `alert_class`" if cls is None else
+                    "no `acknowledges`" if ids is None else
+                    "`acknowledges` is not a list" if not isinstance(ids, list) else
+                    "`acknowledges` is empty and no earlier line with this id acknowledged "
+                    "anything, so it retires nothing"))
     return bad
 
 

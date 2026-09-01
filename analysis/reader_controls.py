@@ -309,6 +309,40 @@ CONTROLS = [
         probe=lambda t, inv: any("PC-uwack-restated" in a for a in inv.get("alerts") or []),
     ),
     dict(
+        name="a RETIREMENT (empty array with history) is not malformed",
+        why="2026-09-01. The half-pair guard was written with the dialect-11 channel; the "
+            "restatement mechanism arrived hours later and nothing reconciled them. `_acks` "
+            "read `acknowledges: []` as a valid retirement while `_ack_malformed` called the "
+            "same line malformed — two readers in ONE file disagreeing about one word, which is "
+            "mechanism (ii) of the class this file exists to catch, committed by its author on "
+            "the day he wrote the taxonomy down. Arc hit it following the spec verbatim.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T15:00:00Z", "id": "PC-retire", "kind": "scoring-note",
+                "alert_class": "unpriced-walk-away", "acknowledges": ["PC-something"],
+                "note": "synthetic control: the original acknowledgement"},
+               {"ts": "2026-09-01T15:01:00Z", "id": "PC-retire", "kind": "scoring-note",
+                "alert_class": "unpriced-walk-away", "acknowledges": [],
+                "note": "synthetic control: retirement — legal, has history"}],
+        probe=lambda t, inv: not any(
+            "half an acknowledgement" in a and "PC-retire" in a
+            for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="a BARE empty acknowledgement (no history) still ALERTs",
+        why="The other direction, and the reason the exception is scoped rather than blanket. "
+            "An empty array with nothing behind it retires nothing and is indistinguishable "
+            "from a half-written line — exactly the case the guard was built for. Widening the "
+            "exception to every empty array would have retired the guard to fix a disagreement, "
+            "which is the symmetric-half error wearing a bugfix's clothes.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T15:10:00Z", "id": "PC-bare-empty", "kind": "scoring-note",
+                "alert_class": "unpriced-walk-away", "acknowledges": [],
+                "note": "synthetic control: empty, no prior acknowledgement under this id"}],
+        probe=lambda t, inv: any(
+            "half an acknowledgement" in a and "PC-bare-empty" in a
+            for a in inv.get("alerts") or []),
+    ),
+    dict(
         name="INERT ts-correction range ALERTs",
         why="2026-09-01. A `ts-correction-<a>-<b>` id silences future-ts for that line range and "
             "nothing ever asked whether the range held a specimen. Arc acknowledged a +10-minute "
