@@ -40,7 +40,7 @@ Run:  python3 analysis/reader_controls.py [--verbose]
 Env:  LEDGER_A / LEDGER_B (same defaults as sweep_composite.sh)
 Exit: 0 = every reader behaved as declared · 2 = a reader lost (or gained) the ability to dissent
 """
-import json, os, subprocess, sys, tempfile
+import concurrent.futures as cf, json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 A = os.path.expanduser(os.environ.get("LEDGER_A", "~/projects/arc-agi-3/launch/prior-ledger.jsonl"))
@@ -779,7 +779,38 @@ def main():
     base = base_lines()
     if base is None: return 0
     bad = []
-    for c in CONTROLS:
+    # PARALLEL, NOT PRUNED (2026-09-01). The hook had crept 5.0s -> 14.7s and the obvious
+    # move was to tag more controls `slow` and drop them from the push path. Measuring first
+    # refused that: cost is FLAT at 0.33-0.36s across all 40, because each control is one full
+    # parser subprocess over the whole ledger. There is no slow subset to cut — tagging would
+    # have removed coverage at random and called it optimisation, and the FAST path's whole
+    # discipline is that a skipped control is announced rather than counted as passing.
+    #
+    # The controls are already independent: separate temp dirs, separate ledgers, separate
+    # INVARIANTS_JSON, no shared state. So they run concurrently and the hook keeps ALL of
+    # them. Deliberately NOT batched into fewer parser runs: plants would then share a ledger
+    # and could stand each other's specimens down — reader interaction is the exact thing these
+    # controls exist to detect, so making them share a reader would corrupt the instrument to
+    # speed it up. Results are collected and printed in DECLARATION order, so the output is
+    # byte-identical to the serial version and a diff of two sweeps still means something.
+    def _run_one(c):
+        lines = [c["strip"](l) for l in base] if c.get("strip") else list(base)
+        lines += [({"stamp": "machine", **pl} if "stamp" not in pl else
+                   {k: v for k, v in pl.items() if not (k == "stamp" and v is None)})
+                  for pl in c["plant"]]
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                text, inv = run(lines, tmp)
+                return bool(c["probe"](text, inv)), text, inv
+            except Exception as e:
+                return False, f"{type(e).__name__}: {e}", {}
+
+    _workers = max(1, min(int(os.environ.get("CONTROLS_JOBS") or 6),
+                          (os.cpu_count() or 2) - 1, len(CONTROLS) or 1))
+    with cf.ThreadPoolExecutor(max_workers=_workers) as _ex:
+        _results = list(_ex.map(_run_one, CONTROLS))
+
+    for c, (dissented, text, inv) in zip(CONTROLS, _results):
         lines = [c["strip"](l) for l in base] if c.get("strip") else list(base)
         # Plants land at the END of the ledger, i.e. inside the machine-stamped era (dialect-12,
         # boundary line 509). A line appended NOW would go through scripts/ledger_append.py and
@@ -787,15 +818,6 @@ def main():
         # unmarked simulates a helper bypass, which is not what these controls are testing and
         # which broke six negative probes the hour the era check landed. A control that wants to
         # test the bypass opts out by setting "stamp": None explicitly.
-        lines += [({"stamp": "machine", **pl} if "stamp" not in pl else
-                   {k: v for k, v in pl.items() if not (k == "stamp" and v is None)})
-                  for pl in c["plant"]]
-        with tempfile.TemporaryDirectory() as tmp:
-            try:
-                text, inv = run(lines, tmp)
-                dissented = bool(c["probe"](text, inv))
-            except Exception as e:                       # a control that crashes is a control
-                text, inv, dissented = f"{type(e).__name__}: {e}", {}, False
         want = c["expect"] == "pass"
         ok = dissented == want
         tag = ("ok  " if ok else "FAIL") if want else ("xfail" if not dissented else "XPASS")
