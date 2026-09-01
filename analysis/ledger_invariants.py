@@ -624,6 +624,17 @@ def alert_classes():
 # is not wired must alert too: an acknowledgement the reader never reads is a stand-down that
 # stands nothing down, and staying quiet about it is the exact silent-no-match this channel
 # exists to end. Wiring a site means adding its name here AND calling _ack_split() there.
+#
+# KEEP THIS SET SMALL, AND DO NOT WIDEN IT AS A CONVENIENCE. Both members earned their place
+# by naming a remedy their recipient CANNOT perform — the 5 walk-aways cannot be retro-priced
+# under the 2026-08-24 peek prohibition, and ship-animfeedback-draw1 was resolved before the
+# split-result rule existed. An alert like that fires forever and teaches everyone to ignore
+# the channel, so acknowledgement is the only honest exit. The other 22 classes have
+# performable remedies (fix the stamp, restate the carrier, register the prior), and wiring
+# one of those would offer acknowledgement as an alternative to fixing it. Arc's own words on
+# declining a third, 2026-09-01: "an acknowledgment channel for them would be an invitation to
+# acknowledge instead of fix." The test before adding a name here is not "would this be tidier"
+# but "is the remedy genuinely unavailable to the party who must perform it?"
 ACK_WIRED = {"unpriced-walk-away", "split-result"}
 
 
