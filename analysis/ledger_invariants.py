@@ -135,6 +135,58 @@ def event_class(l):
     if s.startswith("CLEARED"): return "cleared"
     return "unknown"
 
+CARRIERS_DECLARED = ("outcome", "result", "status")   # dialect-7's declared carriers
+
+
+def _head_word(v):
+    """First whitespace-delimited word of a carrier value, lowered and stripped of trailing
+    punctuation. Arc writes both `"failed"` and `"FAILED — the lever did not fire..."`, so the
+    head is the only part a vocabulary can be checked against."""
+    t = str(v or "").strip()
+    return t.split()[0].strip(".,;:").lower() if t else ""
+
+
+# ── THE GENUS SPLIT (2026-09-01, round-9 research recommendation) ────────────
+# `event_class` above has TWO branches and they are not the same kind of judgement.
+#
+#   DISPOSITION GENUS — `event: "resolution"`. The line claims to settle a bet, so an
+#   unrecognised status head MUST FAIL LOUD: that is the `event-dialect` alert, and
+#   `verdict_of` was taught in round 5 not to let an unparseable head veto a declared verdict
+#   word. Must-understand, and already wired.
+#
+#   ANNOTATION GENUS — every other `event` value. These fall to `return "ignore"`, and until
+#   now that was an ACCIDENT rather than a decision: ANY string arc had never used before
+#   silently became bookkeeping. Must-ignore is the right behaviour and the wrong way to
+#   arrive at it — the distributed-systems rule (HTTP unknown-header, SOAP mustUnderstand) is
+#   that ignoring is safe only for elements DECLARED ignorable, because the alternative is a
+#   reader that cannot distinguish "known to be irrelevant" from "never seen before".
+#
+# So the annotation genus gets a closed vocabulary, exactly as `kind` has. What is declared
+# below is the CURRENT BEHAVIOUR made explicit — every one of these already classed as
+# `ignore`, so declaring them moves NO count and changes no verdict. Deliberately NOT done
+# here: guessing which of them ought to be dispositions. Four of the thirteen "classed ignore
+# and the id carries no disposition anywhere" lines read as finished work (`completion`,
+# `claude-lane-completed`, `causal-premise-tested-free`, `correction`) and nine are correctly
+# in-flight (`launched`, `relaunched`, `submitted`, `phase-progress`...). Sorting them is
+# arc's call on their own record; inventing the split here is the symmetric-half error this
+# file has now refused three times. They are REPORTED as a standing count instead.
+EVENT_TOKENS = {
+    "resolution",                                   # the disposition genus — handled above
+    # 2026-08-09..08-17, the in-flight run cycle: none of these settles anything.
+    "migration", "status-update", "launched", "relaunched", "relaunched-v3", "submitted",
+    "phase-progress", "gate-progress", "draw-2-landed", "completion",
+    # adversary lane — the bet's FATE rides the paired relabel line, not these.
+    "adversary-riders", "adversary-round", "adversary-amendment", "adversary-fatal-2",
+    "KILLED-BY-ADVERSARY-PREPUSH",                  # classes `void` by substring, not `ignore`
+    # bookkeeping on a bet that already exists — the same third genus `kind` grew.
+    "amendment", "correction", "channel-backfill", "cost-declaration", "verification-closed",
+    "commit-run-verified", "hidden-run-fatal-fixed", "realstack-sweep-resolution",
+    "preflight-retrospective", "preflight-remediation", "claude-lane-completed",
+    "causal-premise-tested-free", "REGISTRATION (single-game design)",
+    # restatement events — the carriers bite 7 and today's kind fix both turn on.
+    "head-restatement", "kind-restatement",
+}
+
 _HEADS = {"CLEARED": "cleared", "FAILED": "failed", "DEAD": "failed", "KILLED": "failed"}
 def verdict_of(l):
     ec = event_class(l)
@@ -635,7 +687,16 @@ def alert_classes():
 # declining a third, 2026-09-01: "an acknowledgment channel for them would be an invitation to
 # acknowledge instead of fix." The test before adding a name here is not "would this be tidier"
 # but "is the remedy genuinely unavailable to the party who must perform it?"
-ACK_WIRED = {"unpriced-walk-away", "split-result"}
+ACK_WIRED = {"unpriced-walk-away", "split-result", "undeclared-disposition",
+             "ts-correction-inert"}
+# The two added 2026-09-01 pass the test above rather than bending it. `undeclared-disposition`:
+# all 18 specimens are RESOLVED lines from before 2026-08-17, and the ledger is append-only, so
+# the verdict word on a settled line cannot be restated into a declared one without rewriting
+# history. `ts-correction-inert`: our own parser keys the stand-down on the ID SHAPE, so once a
+# ts-correction id exists its range is silenced forever — arc cannot withdraw it by appending.
+# Both are remedies genuinely unavailable to the party who must perform them. Neither is a
+# convenience: the alternative for each was a date cutoff, which hides the count instead of
+# publishing it.
 
 
 def _overlap(a, b):
@@ -1947,6 +2008,52 @@ def main():
             ts_disorder.append({"id": pid, "ts": ts, "after": prev})
         _ts_seen[pid] = ts if prev is None or ts > prev else prev
     out["ts_disorder"] = ts_disorder
+
+    # ── ts-correction INERTNESS (2026-09-01) ──
+    # A `ts-correction-<a>-<b>` id silences the future-ts check for that inclusive LINE RANGE.
+    # Nothing ever asked whether the range contained a specimen. It does now, because on
+    # 2026-09-01 arc acknowledged a +10-minute same-day future stamp and the future-ts check is
+    # deliberately DAY-granular, so no alert had ever existed: the acknowledgement discharged
+    # nothing, was counted nowhere, and left a phantom in the record implying the detector had
+    # seen something it never saw. Arc found it by self-reporting; our instrument could not.
+    #
+    # This is the SAME defect the dialect-11 channel already guards ("an acknowledged id
+    # matching NO specimen alerts") — written four hours earlier, two hundred lines away, for
+    # the newer channel while the older one with the identical failure mode went untouched.
+    # Mechanism (iii) of our own recurring class, in the file that defines the taxonomy.
+    _all_future = {r["line"] for r in future_ts} | {r["line"] for r in future_ack}
+    _dis_ids = {r["id"] for r in ts_disorder}
+    _dis_lines = {n for n, l in enumerate(lines, 1) if l.get("id") in _dis_ids}
+    _ranges = {}
+    for n, l in enumerate(lines, 1):
+        m = re.fullmatch(r"ts-correction-(\d+)-(\d+)", str(l.get("id") or ""))
+        if m and l.get("kind") == "scoring-note":
+            _ranges.setdefault((int(m[1]), int(m[2])), []).append(n)
+    _inert = {rng: decl for rng, decl in _ranges.items()
+              if not any(a <= x <= b for x in (_all_future | _dis_lines)
+                         for a, b in [rng])}
+    out["ts_correction_ranges"] = {f"{a}-{b}": {"declared_on": d, "inert": (a, b) in _inert}
+                                   for (a, b), d in _ranges.items()}
+    if _inert:
+        _inert_ids = sorted({f"ts-correction-{a}-{b}" for a, b in _inert})
+        _il, _ia = _ack_split("ts-correction-inert", _inert_ids)
+        if _il:
+            # keyed off the RANGE tuples, not by re-parsing the id back into numbers: the id
+            # is the acknowledgement channel's key, and deriving data from a formatted string
+            # we just formatted is how a reader ends up parsing its own output.
+            _named = ", ".join(
+                f"ts-correction-{a}-{b} (declared on line{'s' if len(_ranges[(a, b)]) > 1 else ''}"
+                f" {', '.join(str(n) for n in _ranges[(a, b)])})"
+                for (a, b) in sorted(_inert) if f"ts-correction-{a}-{b}" in set(_il))
+            alerts.append(
+                f"ALERT ts-correction-inert: {len(_il)} ts-correction range(s) acknowledge lines "
+                f"that were never specimens — " + _named
+                + ". No line in the range is future-stamped or in a ts-disorder pair, so the "
+                  "acknowledgement stands nothing down and is counted nowhere — while a reader "
+                  "meeting the id will reasonably infer a detector saw a defect. Note the "
+                  "future-ts check is DAY-granular by design, so a same-day mis-stamp is never "
+                  "its specimen. Append-only means the id cannot be withdrawn, so the remedy is "
+                  "to acknowledge it under alert_class 'ts-correction-inert'")
     if ts_disorder:
         # dialect-3 (7c64878) declared the semantics this tripwire asked for: ts is a
         # HAND-STAMPED NOMINAL event time — a display label with a proven day-typo class.
@@ -2262,6 +2369,88 @@ def main():
               "phrasing. Either the dialect moved under the rule (re-key it on the field "
               "that now carries the fact) or it was written against a phrasing that never "
               "existed (delete it). A rule nothing matches is not a passing check")
+    # ── EVENT VOCABULARY (must-ignore is a DECISION, not an accident) ──
+    ev_seen = {}
+    for l in lines:
+        e = l.get("event")
+        if e: ev_seen.setdefault(str(e), []).append(l.get("id"))
+    ev_new = {e: ids for e, ids in ev_seen.items() if e not in EVENT_TOKENS}
+    print(f"\nEVENT VOCABULARY  {len(ev_seen)} value(s) in use · {len(EVENT_TOKENS)} declared"
+          f" · {len(ev_new)} UNDECLARED"
+          + ("" if ev_new else "  (annotation genus: declared-ignorable, not accidentally ignored)"))
+    for e, ids in sorted(ev_new.items()):
+        alerts.append(
+            f"ALERT event-dialect: event value {e!r} is UNDECLARED, on "
+            f"{', '.join(sorted(set(i for i in ids if i)))} — `event_class` falls through to "
+            f"'ignore', so the line is treated as bookkeeping BY ACCIDENT rather than by "
+            f"decision, and if it carries a disposition that disposition counts nowhere. "
+            f"Decide the genus and declare it: extend EVENT_TOKENS {edit_sites('EVENT_TOKENS')} "
+            f"for the annotation genus, or give the line `event: resolution` with a status head "
+            f"if it settles a bet")
+
+    # Event lines classed 'ignore' whose id carries NO disposition anywhere. REPORTED, not
+    # alerted: 9 of the 13 are correctly in-flight (`launched`, `submitted`) and 4 read as
+    # finished work. Which is which is arc's call on their own record — inventing the split
+    # here is the symmetric-half error, and a count is the honest form of a question.
+    _byid = {}
+    for l in lines: _byid.setdefault(l.get("id"), []).append(l)
+    def _has_disp(l):
+        for f in CARRIERS_DECLARED:
+            h = _head_word(l.get(f))
+            if h and (h in OUTCOME_DECLARED or (set(h.split("-")) & set(OUTCOME_DECLARED))):
+                return True
+        return False
+    nowhere = sorted({l.get("id") for l in lines
+                      if l.get("event") and str(l["event"]) != "resolution"
+                      and event_class(l) == "ignore"
+                      and not any(_has_disp(o) for o in _byid.get(l.get("id"), []))
+                      and l.get("id")})
+    if nowhere:
+        standing.append(
+            f"STANDING event-genus: {len(nowhere)} id(s) whose only event line classes as "
+            f"bookkeeping and which carry no disposition word on any line — "
+            f"{', '.join(nowhere[:10])}{' ...' if len(nowhere) > 10 else ''}. Most are correctly "
+            f"in-flight (launched/submitted/phase-progress); some read as finished work that "
+            f"landed nowhere. Reported, NOT alerted: sorting them is arc's call on their own "
+            f"record, and guessing the genus here is the symmetric-half error")
+
+    # ── UNDECLARED DISPOSITION (must-understand half of the genus split) ──
+    # A head word on a DECLARED disposition carrier that contains no declared disposition
+    # token at all. The line reads as a verdict to a human and scores on no face — the exact
+    # silent-no-match this layer exists for, on the one field where silence is never safe.
+    # `status` is excluded: arc uses it for prose by design and only its WITHDRAWN head is
+    # read, so demanding a declared word there would fire on correct practice.
+    undisp = []
+    for n, l in enumerate(lines, 1):
+        for f in CARRIERS_DECLARED[:2]:               # outcome, result — NOT status
+            h = _head_word(l.get(f))
+            if not h or h in OUTCOME_DECLARED: continue
+            if set(h.split("-")) & set(OUTCOME_DECLARED): continue   # declared token + suffix
+            undisp.append({"id": l.get("id"), "field": f, "head": h, "line": n})
+    if undisp:
+        _ud_live, _ud_ack = _ack_split("undeclared-disposition",
+                                       sorted({r["id"] for r in undisp if r["id"]}))
+        if _ud_live:
+            # EVERY live id is named, not a sample. The first cut showed six examples and the
+            # positive control went red: its planted specimen was real, live, and simply not in
+            # the first six, so the alert was silent about it. An alert that names a subset is
+            # an alert whose absence means nothing — the reader cannot tell "not flagged" from
+            # "flagged and not shown", which is this file's whole subject.
+            _det = {r["id"]: f"{r['field']}: {r['head']!r}" for r in undisp
+                    if r["id"] in set(_ud_live)}
+            alerts.append(
+                f"ALERT undeclared-disposition: {len(_ud_live)} id(s) carry a head word on "
+                f"`outcome`/`result` with no declared disposition token — "
+                + ", ".join(f"{i} ({_det[i]})" for i in _ud_live)
+                + ". The line reads as a verdict and scores on NO face. Declare the word in "
+                  f"OUTCOME_DECLARED {edit_sites('OUTCOME_DECLARED')} if it is a real "
+                  "disposition, restate the line on a declared word if it is not, or "
+                  "acknowledge the id under alert_class 'undeclared-disposition' if the line "
+                  "is settled and can no longer be restated")
+    out["undeclared_disposition"] = undisp
+    out["event_vocabulary"] = {"in_use": sorted(ev_seen), "undeclared": sorted(ev_new),
+                               "ignored_landing_nowhere": nowhere}
+
     # ── ALERT-CLASS VOCABULARY (dialect-11) ──
     # Printed EVERY run, because the counterparty has to be able to read the vocabulary off
     # the machine rather than compose a key from memory — the failure that produced

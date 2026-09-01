@@ -58,7 +58,7 @@ import json, math, os, re, sys
 # FACTS disagreeing, never two independently-typed word lists), so sharing the words costs it
 # nothing. self_check.py still imports NEITHER parser; that separation is untouched.
 # ledger_invariants has no import-time side effects and does not import this file (checked).
-from ledger_invariants import OUTCOME_DECLARED
+from ledger_invariants import OUTCOME_DECLARED, TERMINAL, STATUS_HEADS
 
 DECLINED_WORDS = tuple(sorted((w for w, c in OUTCOME_DECLARED.items() if c == "declined"),
                               key=len, reverse=True))
@@ -72,7 +72,7 @@ OUTJSON = os.environ.get("CALIBRATION_JSON") or os.path.join(
           os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"),
           "seven-dpt", "calibration.json")
 BINS = int(os.environ.get("BINS", 4))
-TERMINAL = ("cleared", "failed")
+# TERMINAL is imported above — single-sourced 2026-09-01 with STATUS_HEADS.
 SPLIT = sys.argv[sys.argv.index("--split") + 1] if "--split" in sys.argv else None
 
 def logit(p):   return math.log(p / (1.0 - p))
@@ -195,7 +195,9 @@ def is_split(l):
     return any(str(w or "").lower().startswith(SPLIT_WORDS)
                for w in (l.get("outcome"), l.get("resolution"), result_field(l)))
 
-STATUS_HEADS = {"WITHDRAWN": "withdrawn"}   # mirrors ledger_invariants.STATUS_HEADS
+# STATUS_HEADS is imported above. It used to be declared here with the comment
+# "mirrors ledger_invariants.STATUS_HEADS" — a comment asserting an equality that
+# nothing enforced, which is the shape every drift in this pair has taken.
 
 def status_class(l):
     """Terminal disposition on a bare `status` — no event, no outcome/resolution. Narrow by

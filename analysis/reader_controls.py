@@ -288,6 +288,98 @@ CONTROLS = [
             for a in inv.get("alerts") or []),
     ),
     dict(
+        name="INERT ts-correction range ALERTs",
+        why="2026-09-01. A `ts-correction-<a>-<b>` id silences future-ts for that line range and "
+            "nothing ever asked whether the range held a specimen. Arc acknowledged a +10-minute "
+            "same-day future stamp against a check that is DAY-granular by design, so no alert "
+            "had ever existed: the acknowledgement discharged nothing, counted nowhere, and left "
+            "a phantom implying the detector saw a defect. The identical guard had been written "
+            "four hours earlier for the dialect-11 channel, two hundred lines away — mechanism "
+            "(iii) of our own recurring class, in the file that defines the taxonomy.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T13:00:00Z", "id": "ts-correction-99001-99001",
+                "kind": "scoring-note", "note": "synthetic control: range holds no specimen"}],
+        probe=lambda t, inv: any(
+            "ts-correction-inert" in a and "99001" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="a ts-correction range WITH a specimen does NOT alert",
+        why="The other direction, and the one that matters: 470-474 is a real acknowledgement of "
+            "a real +1-day typo pair. A check that cannot tell a live range from an inert one "
+            "would retire the mechanism that makes the ts channel usable. Discrimination, not "
+            "detection — the pinned-green shape is a rule that fires on everything.",
+        expect="pass",
+        plant=[],
+        probe=lambda t, inv: not any(
+            "ts-correction-inert" in a and "470-474" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="UNDECLARED event value ALERTs (must-ignore is a decision)",
+        why="`event_class` returns 'ignore' for every non-resolution event value, so any string "
+            "arc had never used before became bookkeeping BY ACCIDENT. Ignoring is the right "
+            "behaviour and was the wrong way to reach it: the distributed-systems rule is that "
+            "ignoring is safe only for elements DECLARED ignorable, because otherwise a reader "
+            "cannot distinguish 'known irrelevant' from 'never seen'.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T13:10:00Z", "id": "PC-newevent", "event": "synthetic-new-event",
+                "note": "synthetic control: undeclared event value"}],
+        probe=lambda t, inv: any(
+            "event-dialect" in a and "synthetic-new-event" in a and "UNDECLARED" in a
+            for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="a DECLARED event value does not alert",
+        why="Discrimination for the control above. 31 values are declared and all 31 are in live "
+            "use; a tripwire that fired on them too would be a rule that cannot pass, which is "
+            "the same vacuity as one that cannot fail.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T13:11:00Z", "id": "PC-oldevent", "event": "launched",
+                "note": "synthetic control: declared annotation-genus event"}],
+        probe=lambda t, inv: not any(
+            "event-dialect" in a and "PC-oldevent" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="UNDECLARED disposition head on `result` ALERTs",
+        why="The must-understand half of the genus split. A head word on a declared disposition "
+            "carrier that contains no declared token reads as a verdict to a human and scores on "
+            "no face — the silent-no-match this layer exists for, on the one field where silence "
+            "is never safe.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T13:20:00Z", "id": "PC-undisp", "kind": "desk",
+                "result": "SPLENDID — the lever did everything we hoped",
+                "note": "synthetic control: verdict-shaped word nobody declared"}],
+        probe=lambda t, inv: any(
+            "undeclared-disposition" in a and "PC-undisp" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="prose on `status` does NOT count as an undeclared disposition",
+        why="The must-IGNORE half, and the reason this rule is scoped to outcome/result. Arc "
+            "writes `status` as prose by design and only its WITHDRAWN head is read, so "
+            "demanding a declared word there would fire on 60+ lines of correct practice — the "
+            "symmetric completion that looks tidy and outlaws the counterparty's own convention.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T13:21:00Z", "id": "PC-statusprose", "kind": "desk",
+                "status": "characterized the wall as a token-budget effect, not a lever effect",
+                "note": "synthetic control: status prose"}],
+        probe=lambda t, inv: not any(
+            "undeclared-disposition" in a and "PC-statusprose" in a
+            for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="a declared word PLUS a suffix is understood, not flagged",
+        why="`failed-as-blind-bfs`, `instrument-void-lever-did-not-fire` and four more are "
+            "compounds of a declared token. They ARE understood by result_field, so flagging "
+            "them would be the check disagreeing with the reader it is meant to protect — two "
+            "statements of one fact, which is the genus underneath every bite in this file.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T13:22:00Z", "id": "PC-compound", "kind": "desk",
+                "result": "failed-as-synthetic-compound",
+                "note": "synthetic control: declared token + suffix"}],
+        probe=lambda t, inv: not any(
+            "undeclared-disposition" in a and "PC-compound" in a
+            for a in inv.get("alerts") or []),
+    ),
+    dict(
         name="alert remedies name the REAL edit sites",
         why="Three alerts told the operator to 'extend X in BOTH parsers'. Two were stale — the "
             "OUTCOME_DECLARED one within hours of that constant being single-sourced, the "
@@ -475,6 +567,28 @@ CONTROLS = [
 # no-import rule exists so a control cannot inherit the bug it is testing, and shelling out
 # preserves that while still letting the check reach inside the modules.
 VOCAB_CONTROLS = [
+    dict(
+        name="TERMINAL and STATUS_HEADS are the SAME OBJECT in both parsers",
+        why="The three-constant tidy, 2026-09-01. Both were declared twice with identical "
+            "literals, one carrying the comment \"mirrors ledger_invariants.STATUS_HEADS\" — a "
+            "comment asserting an equality nothing enforced, which is the shape every drift in "
+            "this pair has taken (22 of 42 parser commits touched exactly one side). Identity, "
+            "not equality: two equal tuples today are two tuples tomorrow.",
+        expect="pass",
+        code = """
+import sys, json, io, contextlib
+sys.path.insert(0, %r)
+import ledger_invariants as L
+with contextlib.redirect_stdout(io.StringIO()):   # calibration reports at import time
+    import calibration as C
+print(json.dumps({"terminal": C.TERMINAL is L.TERMINAL,
+                  "status_heads": C.STATUS_HEADS is L.STATUS_HEADS,
+                  "redeclared": [n for n in ("TERMINAL", "STATUS_HEADS")
+                                 if open(C.__file__).read().count(chr(10) + n + " = ")]}))
+""",
+        probe=lambda r: (r.get("terminal") is True and r.get("status_heads") is True
+                         and r.get("redeclared") == []),
+    ),
     dict(
         name="dialect vocabulary reaches BOTH parsers",
         why="Until 2026-08-31 calibration.py re-encoded subsets of OUTCOME_DECLARED as literal "
