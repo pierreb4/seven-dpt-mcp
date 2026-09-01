@@ -144,6 +144,55 @@ CONTROLS = [
         probe=lambda t, inv: "synthetic-undeclared-kind" in t,
     ),
     dict(
+        name="RESTATEMENT stands an undeclared kind down, and is COUNTED",
+        why="2026-09-01. The ledger is append-only, so an undeclared token can never leave the "
+            "line that carries it — the only correction available to the writer is to append a "
+            "restatement. This check ignored those, so its printed remedy was 'extend "
+            "KIND_TOKENS', the single action both sides had correctly refused: arc restated two "
+            "ids exactly as dialect-3's latest-wins convention prescribes and the alert did not "
+            "move. That is the defect we had criticised in arc's dialect-8 the day before — an "
+            "alert whose recipient cannot clear it by doing the right thing — sitting in our own "
+            "face. Stand-down, not silence: it must land in the acknowledgement denominator.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T09:00:00Z", "id": "PC-restated",
+                "kind": "synthetic-restated-kind", "note": "synthetic control: undeclared"},
+               {"ts": "2026-09-01T09:01:00Z", "id": "PC-restated", "kind": "desk-probe",
+                "amends": "PC-restated", "note": "synthetic control: class restated"}],
+        probe=lambda t, inv: (
+            "synthetic-restated-kind" in ((inv.get("kind_census") or {}).get("superseded") or {})
+            and not any("synthetic-restated-kind" in a for a in inv.get("alerts") or [])
+            and any(r.get("id") == "PC-restated"
+                    for r in inv.get("acknowledgement_standdowns") or [])),
+    ),
+    dict(
+        name="a RESOLUTION line does NOT supersede an undeclared kind",
+        why="The rewarded misuse of the restatement rule. A resolution line lands after almost "
+            "every registration, usually within the hour, and carries `amends` naming the same "
+            "id — so if any later declared kind counted as a restatement, the tripwire would be "
+            "stood down as a matter of routine by the very line that resolves the bet. This is "
+            "what _ROLE_KINDS exists to prevent, and prose saying so is what a later reader "
+            "tidies away.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T09:10:00Z", "id": "PC-role-guard",
+                "kind": "synthetic-roleguard-kind", "note": "synthetic control: undeclared"},
+               {"ts": "2026-09-01T09:11:00Z", "id": "PC-role-guard", "kind": "resolution",
+                "amends": "PC-role-guard", "result": "cleared",
+                "note": "synthetic control: a role line, NOT a restatement"}],
+        probe=lambda t, inv: any("synthetic-roleguard-kind" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="a later declared kind WITHOUT `amends` does not stand down",
+        why="Restatement is a deliberate act and must say so. Without the marker, any later "
+            "registration reusing an id would clear the tripwire by accident — the silent "
+            "no-match failure this whole layer was built for, arriving through the remedy.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T09:20:00Z", "id": "PC-noamends",
+                "kind": "synthetic-noamends-kind", "note": "synthetic control: undeclared"},
+               {"ts": "2026-09-01T09:21:00Z", "id": "PC-noamends", "kind": "desk-probe",
+                "note": "synthetic control: declared kind but NO amends marker"}],
+        probe=lambda t, inv: any("synthetic-noamends-kind" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
         name="alert remedies name the REAL edit sites",
         why="Three alerts told the operator to 'extend X in BOTH parsers'. Two were stale — the "
             "OUTCOME_DECLARED one within hours of that constant being single-sourced, the "

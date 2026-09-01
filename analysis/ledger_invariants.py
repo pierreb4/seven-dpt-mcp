@@ -469,6 +469,20 @@ KIND_TOKENS = {"substrate", "pilot", "instrument", "lever", "desk-probe",
                # ordinary forecast should — no `substrate`, declaring moves NO count.
                "submission"}
 
+# READER-SIDE ONLY — this widens NO vocabulary. Every name below is already declared in
+# KIND_TOKENS above; what this records is which of them cannot act as a RESTATEMENT of an
+# item's registration class. It is the "third genus" the 2026-08-14 note names: kinds that
+# answer "what is this LINE doing to a bet that already exists?" rather than "what IS this
+# bet?". They land after almost every registration, so treating one as a restatement would
+# stand undeclared registration tokens down as a matter of routine — a `resolution` line
+# arriving the usual twenty minutes later would silence the tripwire on the prereg it
+# resolves. Controlled by `a RESOLUTION line does NOT supersede an undeclared kind`.
+_ROLE_KINDS = {"resolution", "correction", "annotation", "amendment", "scoring-note",
+               "prior-amendment", "selection-rule-amendment", "lane-note", "ledger-hygiene",
+               "channel-refinement", "channel-stamp", "mechanism-fix", "smoke-result",
+               "adversary-block", "parked", "decision", "protocol"}
+assert not (_ROLE_KINDS - KIND_TOKENS), "a role kind must already be declared"
+
 # ── STATUS-ONLY TERMINALS (2026-08-14) ───────────────────────────────────────
 # A third channel, found the hard way: sb26-animfeedback-draw1 was WITHDRAWN UNRUN with zero
 # GPU spent, and the line carries neither `event` nor `outcome`/`resolution` — the disposition
@@ -1992,23 +2006,70 @@ def main():
     # unrecognised token is the moment a new registration class appears, and if it means
     # "measurement draw" without saying `substrate` it will score as an ordinary bet.
     kinds, kind_unknown = {}, {}
-    for l in lines:
+    _kind_lines = {}          # id -> [(position, kind, amends)] for every kind-bearing line
+    for _pos, l in enumerate(lines):
         kv = str(l.get("kind") or "").strip()
         if not kv: continue
         kinds[kv] = kinds.get(kv, 0) + 1
+        _kind_lines.setdefault(str(l.get("id") or ""), []).append(
+            (_pos, kv, str(l.get("amends") or "")))
         if kind_tokens(l) - KIND_TOKENS:
-            kind_unknown.setdefault(kv, []).append(l.get("id"))
+            kind_unknown.setdefault(kv, []).append((str(l.get("id") or ""), _pos))
+
+    def _restated_after(iid, pos):
+        """Position of a later line that RESTATES iid's class with a declared kind, or None.
+
+        The ledger is append-only, so an undeclared token can never be erased from the line
+        that carries it — arc's only available correction is to append a restatement. Until
+        2026-09-01 this check ignored those, which made it an alert whose printed remedy
+        ("extend KIND_TOKENS") was the one action both sides had correctly refused: arc
+        restated two ids exactly as dialect-3's latest-wins convention prescribes and the
+        alert did not move. An alert its recipient cannot clear by doing the right thing is
+        an alert that teaches people to ignore the channel.
+
+        Requires the restating line to carry `amends` naming the id — restatement is a
+        deliberate act and should say so, and demanding the marker keeps a merely-later
+        registration from clearing the tripwire by accident.
+        """
+        for p2, kv2, am2 in _kind_lines.get(iid, ()):
+            if p2 <= pos or am2 != iid: continue
+            t2 = kind_tokens({"kind": kv2})
+            if t2 - KIND_TOKENS: continue      # a later UNDECLARED kind restates nothing
+            if t2 & _ROLE_KINDS: continue      # role lines land after everything — see _ROLE_KINDS
+            return p2
+        return None
     if kinds:
         ks = " ".join(f"{k}:{v}" for k, v in sorted(kinds.items(), key=lambda kv: -kv[1]))
         comp = [k for k in kinds if len(kind_tokens({"kind": k})) > 1]
         print(f"KIND  {ks}" + (f" · compound (token-matched): {', '.join(comp)}" if comp else ""))
-    for kv, ids in sorted(kind_unknown.items()):
+    _superseded = {}          # kind -> [ids] whose class a later line has restated
+    for kv, hits in sorted(kind_unknown.items()):
+        live = sorted({i for i, pos in hits if i and _restated_after(i, pos) is None})
+        done = sorted({i for i, pos in hits if i and _restated_after(i, pos) is not None})
+        if done:
+            _superseded[kv] = done
+            for i in done: _standdown("kind-dialect", i)
+        if not live: continue
         new = ", ".join(sorted(kind_tokens({"kind": kv}) - KIND_TOKENS))
         tail = ("it already token-matches `substrate`, so it correctly does NOT score — confirm that is intended"
                 if is_substrate({"kind": kv}) else
                 "it will SCORE as an ordinary forecast; if it names a measurement draw the value must contain `substrate`")
-        alerts.append(f"ALERT kind-dialect: kind '{kv}' carries unknown token(s) [{new}] on {', '.join(sorted(set(i for i in ids if i)))} — {tail}. Extend KIND_TOKENS {edit_sites('KIND_TOKENS')}")
-    out["kind_census"] = {"values": kinds, "unknown": {k: sorted(set(v)) for k, v in kind_unknown.items()}}
+        alerts.append(
+            f"ALERT kind-dialect: kind '{kv}' carries unknown token(s) [{new}] on "
+            f"{', '.join(live)} — {tail}. REMEDY: append a line per id restating its class "
+            f"with a declared kind and `amends` naming the id (append-only: the original "
+            f"line keeps the token, so a PROSE retirement clears nothing). Extend KIND_TOKENS "
+            f"{edit_sites('KIND_TOKENS')} only if the token is genuinely a new class")
+    if _superseded:
+        standing.append(
+            "STANDING kind-dialect: undeclared token(s) SUPERSEDED by restatement — "
+            + " · ".join(f"'{k}' on {', '.join(v)}" for k, v in sorted(_superseded.items()))
+            + ". The original line still physically carries the token and always will, so any"
+              " reader scanning kinds PER LINE rather than resolving per id will still see it;"
+              " what is discharged is the writer-side obligation, not the reader-side one")
+    out["kind_census"] = {"values": kinds,
+                          "unknown": {k: sorted({i for i, _ in v}) for k, v in kind_unknown.items()},
+                          "superseded": _superseded}
 
     # ── ORPHANED EXISTENTIALS (seven-dpt store, if present) ──
     store_p = os.environ.get("SEVEN_DPT_DB") or os.path.join(
