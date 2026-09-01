@@ -309,6 +309,40 @@ CONTROLS = [
         probe=lambda t, inv: any("PC-uwack-restated" in a for a in inv.get("alerts") or []),
     ),
     dict(
+        name="a ts disorder on a MARKED line is a FAULT and resists acknowledgement",
+        why="The rewarded misuse of the era boundary. `ts-correction-<a>-<b>` and the prose "
+            "acknowledgement channel were both built for HAND typos; on a machine-stamped line "
+            "the same disorder means the clock, the timezone, or the helper is wrong. If the "
+            "typo channel could still silence it, the first real clock bug would be waved "
+            "through by a rule written for a different genus — the acknowledgement channel's "
+            "rewarded misuse arriving through an era boundary rather than a careless waiver. "
+            "This control acknowledges the id in the normal way and requires the alert anyway.",
+        expect="pass",
+        plant=[{"ts": "2026-09-02T10:00:00Z", "id": "PC-clockfault", "kind": "desk",
+                "note": "synthetic control: machine-stamped, later day"},
+               {"ts": "2026-09-01T10:00:00Z", "id": "PC-clockfault", "kind": "desk",
+                "note": "synthetic control: machine-stamped, EARLIER day on the same id"},
+               {"ts": "2026-09-01T16:30:00Z", "id": "kind-dialect-semantics-PC13",
+                "kind": "scoring-note",
+                "note": "synthetic control: acknowledges PC-clockfault as a day-typo"}],
+        probe=lambda t, inv: any(
+            "stamp-fault" in a and "PC-clockfault" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
+        name="an UNMARKED line in the machine era ALERTs (helper bypass)",
+        why="2026-09-01, arc's dialect-12. Every line scripts/ledger_append.py writes carries "
+            "`stamp: machine`, so an unmarked line after the boundary was appended around the "
+            "helper and its `ts` carries neither dialect's authority. Keyed on POSITION (the "
+            "first marked line) rather than a date, so it needs no constant and cannot go "
+            "stale. This control opts out of the harness's automatic marking, which is the "
+            "only place in the suite that does.",
+        expect="pass",
+        plant=[{"ts": "2026-09-01T16:00:00Z", "id": "PC-bypass", "kind": "desk", "stamp": None,
+                "note": "synthetic control: appended around the helper"}],
+        probe=lambda t, inv: any(
+            "stamp-bypass" in a and "PC-bypass" in a for a in inv.get("alerts") or []),
+    ),
+    dict(
         name="a RETIREMENT (empty array with history) is not malformed",
         why="2026-09-01. The half-pair guard was written with the dialect-11 channel; the "
             "restatement mechanism arrived hours later and nothing reconciled them. `_acks` "
@@ -747,7 +781,15 @@ def main():
     bad = []
     for c in CONTROLS:
         lines = [c["strip"](l) for l in base] if c.get("strip") else list(base)
-        lines += c["plant"]
+        # Plants land at the END of the ledger, i.e. inside the machine-stamped era (dialect-12,
+        # boundary line 509). A line appended NOW would go through scripts/ledger_append.py and
+        # carry `stamp: machine`, so marking plants is the FAITHFUL simulation; leaving them
+        # unmarked simulates a helper bypass, which is not what these controls are testing and
+        # which broke six negative probes the hour the era check landed. A control that wants to
+        # test the bypass opts out by setting "stamp": None explicitly.
+        lines += [({"stamp": "machine", **pl} if "stamp" not in pl else
+                   {k: v for k, v in pl.items() if not (k == "stamp" and v is None)})
+                  for pl in c["plant"]]
         with tempfile.TemporaryDirectory() as tmp:
             try:
                 text, inv = run(lines, tmp)

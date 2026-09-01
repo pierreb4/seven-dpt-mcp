@@ -135,6 +135,35 @@ def event_class(l):
     if s.startswith("CLEARED"): return "cleared"
     return "unknown"
 
+# ── THE ts ERA BOUNDARY (arc's dialect-12, 2026-09-01) ──────────────────────
+# `ts` graduated mid-morning from a hand-stamped nominal label to a machine instrument, when
+# arc shipped scripts/ledger_append.py (it generates every stamp and REFUSES a hand-supplied
+# one). That made `ts` a MIXED-AUTHORITY field: dialect-3 ("ts is nominal, file order is the
+# clock") and dialect-12 ("ts is an instrument") are both true of the same ledger, of different
+# lines. The boundary is carried by the DATA — every line the helper writes is marked — rather
+# than by a date this file would have to know, which is the difference between a rule with an
+# executor and a rule with a comment. Asked for and shipped the same hour; until it existed we
+# read every line as dialect-3, which was correct for every line that then existed.
+#
+# What changes on a MARKED line: a wrong `ts` is no longer a typo but an INSTRUMENT FAULT
+# (clock skew, wrong TZ, or a bypassed helper), so it is investigated, never acknowledged. The
+# `ts-correction-<a>-<b>` channel was built for hand-typos and dialect-12 makes it legal only
+# against unmarked lines — same channel, two genera, and after the boundary exists as data a
+# reader can finally tell them apart.
+STAMP_MACHINE = "machine"
+
+
+def era_boundary(lines):
+    """1-based position of the first machine-stamped line, or None before the era begins."""
+    for n, l in enumerate(lines, 1):
+        if l.get("stamp") == STAMP_MACHINE: return n
+    return None
+
+
+def is_marked(l):
+    return l.get("stamp") == STAMP_MACHINE
+
+
 CARRIERS_DECLARED = ("outcome", "result", "status")   # dialect-7's declared carriers
 
 
@@ -2093,9 +2122,28 @@ def main():
         # only; time-keyed gates resolve boundary cases by git-blame arrival, and a
         # registration is valid iff it ARRIVES before its arm's results are known. The
         # check now runs AS the declaration's check: named specimens stand, new ones alert.
-        _acked = [r for r in ts_disorder if r["id"] in _ack_toks]
+        # dialect-12: an acknowledgement is a statement about a HAND stamp. On a machine-
+        # stamped line the same disorder is an instrument fault, so it must not be silenceable
+        # by the typo channel — otherwise the first real clock bug gets waved through by a rule
+        # written for a different genus, which is the acknowledgement channel's rewarded misuse
+        # arriving through an era boundary rather than through a careless waiver.
+        _marked_ids = {l.get("id") for l in lines if is_marked(l)}
+        _faulty = [r for r in ts_disorder if r["id"] in _marked_ids]
+        _acked = [r for r in ts_disorder
+                  if r["id"] in _ack_toks and r["id"] not in _marked_ids]
         for r in _acked: _standdown("ts-disorder", r["id"])
-        _fresh = [r for r in ts_disorder if r["id"] not in _ack_toks]
+        _fresh = [r for r in ts_disorder
+                  if r["id"] not in _ack_toks and r["id"] not in _marked_ids]
+        if _faulty:
+            alerts.append(
+                f"ALERT stamp-fault: {len(_faulty)} id(s) carry a ts disorder on a "
+                f"MACHINE-STAMPED line — "
+                + ", ".join(f"{r['id']} ({r['ts']} after {r['after']})" for r in _faulty)
+                + ". dialect-12 makes `ts` an instrument on marked lines, so this is not the "
+                  "day-typo class and CANNOT be acknowledged: either the clock is wrong, the "
+                  "timezone is wrong, or a line was appended around scripts/ledger_append.py. "
+                  "Investigate and fix the mechanism — a ts-correction range against a marked "
+                  "line is illegal by dialect-12")
         if _acked:
             standing.append("STANDING ts-disorder: acknowledged day-typos (dialect-3: ts is "
                             "a nominal label; file order, then git blame, is the clock) — "
@@ -2401,6 +2449,43 @@ def main():
               "phrasing. Either the dialect moved under the rule (re-key it on the field "
               "that now carries the fact) or it was written against a phrasing that never "
               "existed (delete it). A rule nothing matches is not a passing check")
+    # ── ts ERA (dialect-12) ──
+    _boundary = era_boundary(lines)
+    _n_marked = sum(1 for l in lines if is_marked(l))
+    print(f"\nTS ERA  {len(lines) - _n_marked} hand-stamped (dialect-3: nominal label, file "
+          f"order is the clock) · {_n_marked} machine-stamped (dialect-12: instrument)"
+          + (f" · boundary at line {_boundary}" if _boundary else " · era not begun"))
+    if _boundary:
+        # A line after the boundary with no mark means someone appended around the helper —
+        # arc's own dialect-12 calls that a specimen. Position, not date: the boundary is where
+        # the first marked line sits, so this needs no constant and cannot go stale.
+        _bypass = [(n, l.get("id")) for n, l in enumerate(lines, 1)
+                   if n > _boundary and not is_marked(l)]
+        if _bypass:
+            alerts.append(
+                f"ALERT stamp-bypass: {len(_bypass)} line(s) after the era boundary (line "
+                f"{_boundary}) carry no `stamp` — "
+                + ", ".join(f"line {n} {i}" for n, i in _bypass[:8])
+                + (" ..." if len(_bypass) > 8 else "")
+                + ". Every line scripts/ledger_append.py writes is marked, so an unmarked line "
+                  "in the marked era was appended around the helper and its `ts` carries "
+                  "neither dialect's authority. Re-append it through the helper, or declare why "
+                  "the bypass was necessary")
+        # dialect-12: the typo channel is legal only against UNMARKED lines.
+        _illegal = []
+        for (a, b), decl in _ranges.items():
+            hit = [n for n, l in enumerate(lines, 1) if a <= n <= b and is_marked(l)]
+            if hit: _illegal.append((a, b, hit))
+        if _illegal:
+            alerts.append(
+                f"ALERT stamp-fault: {len(_illegal)} ts-correction range(s) cover "
+                f"MACHINE-STAMPED lines — "
+                + ", ".join(f"ts-correction-{a}-{b} (marked: {', '.join(str(n) for n in h[:4])})"
+                            for a, b, h in _illegal)
+                + ". dialect-12 makes the typo channel legal only against unmarked lines: a "
+                  "wrong stamp on a marked line is an instrument fault to investigate, not a "
+                  "hand-typo to acknowledge")
+
     # ── EVENT VOCABULARY (must-ignore is a DECISION, not an accident) ──
     ev_seen = {}
     for l in lines:
