@@ -201,10 +201,15 @@ def _enclosing_funcs(tree):
     return cover
 
 
-def scan_code(path):
+def scan_code(path, text=None):
     """Every COMPARISON in the file, checked against the register. A comparison is the
-    executable form of a gate: a threshold, a date cutoff, a legality condition."""
-    src = open(path).read()
+    executable form of a gate: a threshold, a date cutoff, a legality condition.
+
+    `text` scans PROPOSED content for `path` instead of what is on disk -- the hook in
+    analysis/hooks/gate-register-pretool.py uses it to diff a pending Edit/Write against
+    the file as it stands, so the register fires on the DELTA at the authoring moment
+    rather than on the standing findings at the next sweep (spark #59)."""
+    src = open(path).read() if text is None else text
     lines = src.splitlines()
     tree = ast.parse(src)
     machine_ts = _module_stamps_its_own_ts(tree)
