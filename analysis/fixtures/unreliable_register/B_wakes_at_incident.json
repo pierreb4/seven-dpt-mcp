@@ -1,0 +1,31 @@
+{
+ "version": 1,
+ "problems": [],
+ "sparks": [
+  {
+   "id": 50,
+   "wakeCondition": {
+    "summary": "prior-ledger reaches 450 lines",
+    "all": [
+     {
+      "signal": "fileLines",
+      "path": "~/projects/arc-agi-3/launch/prior-ledger.jsonl",
+      "gte": 450
+     }
+    ]
+   }
+  },
+  {
+   "id": 49,
+   "wakeCondition": {
+    "summary": "curve n reaches 80",
+    "all": [
+     {
+      "signal": "resolvedSparkCount",
+      "gte": 80
+     }
+    ]
+   }
+  }
+ ]
+}

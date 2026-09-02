@@ -1,0 +1,39 @@
+{
+ "version": 1,
+ "problems": [],
+ "sparks": [
+  {
+   "id": 50,
+   "wakeCondition": {
+    "summary": "the QUANTITY, not the count",
+    "all": [
+     {
+      "signal": "fileLines",
+      "path": "~/projects/arc-agi-3/launch/prior-ledger.jsonl",
+      "gte": 560
+     },
+     {
+      "signal": "manual",
+      "note": "count arms holding >=2 DIFFERENT prior values"
+     }
+    ]
+   }
+  },
+  {
+   "id": 49,
+   "wakeCondition": {
+    "summary": "nested-pair COUNT, not n",
+    "all": [
+     {
+      "signal": "date",
+      "onOrAfter": "2026-09-15"
+     },
+     {
+      "signal": "manual",
+      "note": "count nested pairs on the curve"
+     }
+    ]
+   }
+  }
+ ]
+}
