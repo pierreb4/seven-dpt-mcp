@@ -130,6 +130,11 @@ def event_class(l):
         return "void" if ("KILLED" in ev or "PREPUSH" in ev) else "ignore"
     s = (l.get("status") or "").upper()
     if s.startswith("VOID") or "PREPUSH" in s: return "void"
+    # GRAY head: declared kind-dialect-semantics-13 (2026-09-02), same class as the word-form.
+    # SUBSTRATE head: STILL UNDECLARED and a KNOWN LIVE DIVERGENCE — this line reads it
+    # terminal-nonscored, arc's flightcheck reads it as an unknown head and holds the arm
+    # open (specimen: colab-mtp-draw1, "SUBSTRATE-NO"). Deliberately left out of -13, whose
+    # scope was gray/inconclusive only; it needs its own decision, not a silent extension.
     if s.startswith("GRAY") or s.startswith("SUBSTRATE"): return "nonscored"
     if s.startswith("FAILED"): return "failed"
     if s.startswith("CLEARED"): return "cleared"
@@ -336,6 +341,16 @@ OUTCOME_DECLARED = {
     # completed run (a family that grayed three times HAS attempted three times), calibration
     # keeps it off the curve (a gray has no y to score). Reason words declared alongside so
     # each stays readable alone.
+    # DECLARED 2026-09-02 as kind-dialect-semantics-13 (amends -8 additively; arc eb6c276).
+    # These four had carried the semantics below since 2026-08-14 and had NEVER been written
+    # into the shared dialect — so when arc's flightcheck grew its own closed terminal set,
+    # the two readers disagreed on seven arms and nothing could adjudicate, because the rule
+    # existed only in this file. The declaration says exactly what this map says (terminal,
+    # closes the id for demand, never scored) plus the two forbidden readings. Cite the id,
+    # not this line: a reader who re-derives the vocabulary from one implementation is how
+    # the divergence happened. Arc's side: flightcheck.PARKED = {gray, inconclusive}, a
+    # leading `ran-and-` stripped, any GRAY-prefixed status head parks, own bucket excluded
+    # from resolved so nothing here can reach a calibration reader.
     "gray": "nonscored", "inconclusive": "nonscored",
     "ran-and-grayed": "nonscored", "ran-and-inconclusive": "nonscored",
     # 2026-08-16 — ONE RUN, TWO PRE-DECLARED QUESTIONS, TWO DIFFERENT VERDICTS.

@@ -152,6 +152,10 @@ def is_void(l):
                for w in (l.get("outcome"), l.get("resolution"), result_field(l))) \
         or event_class(l) == "void"
 
+# gray/inconclusive and compounds: DECLARED kind-dialect-semantics-13 (2026-09-02, arc
+# eb6c276) — terminal, and non-scored precisely so a non-adjudication cannot enter this
+# curve as a verdict. Keeping the OFF-CURVE half in the declaration was the point: folding
+# gray into "resolved" generally would push a run with no ground truth into the Brier lane.
 NONSCORED_WORDS = ("gray", "inconclusive", "ran-and-grayed", "ran-and-inconclusive",
                    # `confirmed` (kind-dialect-semantics-4, 2026-08-30): fact established,
                    # never scored. Legal ONLY on an unpriced entry, so on a well-formed
