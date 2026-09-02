@@ -107,6 +107,55 @@ test("a manual atom turns full numeric ripeness into manual-gate, never ripe", (
     ],
   });
   assert.equal(r.state, "manual-gate");
+  // The judgement is the gate once the numerics are in — binding must name it, not echo a
+  // numeric atom sitting at 100%.
+  assert.match(r.binding, /check capture integrity/);
+});
+
+// Regression, spark #50: the digest showed "prior-ledger 522/560 (93%)" for a month while
+// the spark's real bar — a manual census at 2 of 6 — had not moved, because binding was
+// reduced over numeric atoms alone. A manual atom cannot ripen, so it is always the
+// weakest link; the percentage may still be shown, never alone.
+test("a climbing numeric atom never hides an outstanding manual bar", () => {
+  useStore([], [mkSpark(1, { value: 1 })]);
+  const r = evaluateWake({
+    summary: "s",
+    all: [
+      { signal: "sparkCount", gte: 10 },
+      { signal: "manual", note: "Re-run the distinct-value census: >=6 arms with >=2 different priced values." },
+    ],
+  });
+  assert.equal(r.state, "ripening");
+  assert.equal(r.progress, 0.1); // approach to check-due is real progress, still reported
+  assert.match(r.binding, /sparks 1\/10/);
+  assert.match(r.binding, /manual bar unmet/);
+  assert.match(r.binding, /distinct-value census/);
+});
+
+test("the manual note is clipped to one clause so it cannot swamp the digest line", () => {
+  useStore([], []);
+  const r = evaluateWake({
+    summary: "s",
+    all: [
+      { signal: "sparkCount", gte: 10 },
+      { signal: "manual", note: "First clause here. " + "x".repeat(400) },
+    ],
+  });
+  assert.match(r.binding, /First clause here\./);
+  assert.ok(r.binding.length < 140, `binding too long: ${r.binding.length}`);
+});
+
+test("an unreadable source binds, rather than a numeric atom that can still be read", () => {
+  useStore([], []);
+  const r = evaluateWake({
+    summary: "s",
+    all: [
+      { signal: "sparkCount", gte: 10 },
+      { signal: "fileLines", path: "/nonexistent/definitely-not-here.jsonl", gte: 5 },
+    ],
+  });
+  assert.equal(r.state, "unreadable");
+  assert.match(r.binding, /definitely-not-here/);
 });
 
 test("pure-manual condition never auto-ripens", () => {

@@ -509,6 +509,13 @@ function evalAtom(atom: WakeAtom, db: DB): AtomReadout {
   }
 }
 
+// A manual note states the real bar in full; the digest has one line. Take the first
+// clause, capped — enough to recognise the bar, never enough to swamp the numeric echo.
+function shortNote(echo: string, cap = 72): string {
+  const body = echo.replace(/^manual: /, "").split(/(?<=[.;:])\s|\s—\s/)[0].trim();
+  return body.length > cap ? `${body.slice(0, cap - 1)}…` : body;
+}
+
 function evalCondition(cond: WakeCondition, db: DB): WakeReadout {
   const mode = cond.all ? "all" : "any";
   const atoms = (cond.all ?? cond.any ?? []).map((a) => evalAtom(a, db));
@@ -532,8 +539,19 @@ function evalCondition(cond: WakeCondition, db: DB): WakeReadout {
     else state = "ripening";
   } else {
     // Ripe when every numeric atom fires AND no manual atom remains; a manual atom turns
-    // full numeric ripeness into "manual-gate" — check due, never auto-fired. Binding = weakest link.
-    bindingAtom = numeric.reduce<AtomReadout | undefined>(
+    // full numeric ripeness into "manual-gate" — check due, never auto-fired.
+    //
+    // Binding = weakest link, and a MANUAL ATOM IS ALWAYS THE WEAKEST: it cannot ripen on
+    // its own, so no numeric atom can be the constraint while one is outstanding. Binding
+    // used to be reduced over `numeric` alone, which made the manual bar structurally
+    // invisible — spark #50 read "prior-ledger 522/560 (93%)" in the digest for a month
+    // while its real bar (a manual census, 2 of 6 distinct-value arms) had not moved. The
+    // number on display was the LEAST informative one available: #50's line atom had been
+    // raised to 560 precisely so the numeric half could not fire alone. A percentage is
+    // still shown, because approach to "check due" is real progress — but it is never
+    // shown alone, and it never claims to be progress toward ripe.
+    const manualAtom = atoms.find((a) => a.state === "manual");
+    const weakestNumeric = numeric.reduce<AtomReadout | undefined>(
       (worst, a) => (worst === undefined || a.progress! < worst.progress! ? a : worst),
       undefined,
     );
@@ -541,6 +559,20 @@ function evalCondition(cond: WakeCondition, db: DB): WakeReadout {
     else if (numeric.length > 0 && numeric.every((a) => a.state === "ripe"))
       state = hasManual ? "manual-gate" : "ripe";
     else state = "ripening"; // includes pure-manual conditions: they can never auto-ripen
+
+    if (hasUnreadable) bindingAtom = atoms.find((a) => a.state === "unreadable");
+    else if (state === "manual-gate") bindingAtom = manualAtom; // numerics are in; the judgement is the gate
+    else bindingAtom = weakestNumeric ?? manualAtom;
+
+    // The numerics are still climbing AND a manual bar is outstanding: name both, or the
+    // percentage reads as the whole constraint.
+    if (state === "ripening" && manualAtom && weakestNumeric)
+      return {
+        state,
+        progress: weakestNumeric.progress,
+        binding: `${weakestNumeric.echo} · manual bar unmet: ${shortNote(manualAtom.echo)}`,
+        atoms,
+      };
   }
   return {
     state,
