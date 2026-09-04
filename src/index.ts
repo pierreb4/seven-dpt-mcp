@@ -16,6 +16,7 @@ import {
   type Problem,
   type WakeCondition,
   type WakeEntry,
+  takeForeignSparkNote,
 } from "./store.js";
 
 // ---- wake-condition schema (0.1.4): the machine half of a re-open trigger ----
@@ -218,6 +219,13 @@ if (process.argv.includes("--digest")) {
 
 const server = new McpServer({ name: "seven-dpt", version: "0.1.5" });
 
+// Appended to replies that read the store: tells the session when ANOTHER session has been
+// capturing sparks, so it never predicts an id (see store.ts cross-session bookkeeping).
+function foreignNote(): string {
+  const n = takeForeignSparkNote();
+  return n ? `\n${n}` : "";
+}
+
 server.registerTool(
   "add_problem",
   {
@@ -365,7 +373,7 @@ server.registerTool(
   },
   async ({ trick }) => {
     const problems = listProblems(false);
-    return { content: [{ type: "text", text: evocationScaffold(trick, problems) }] };
+    return { content: [{ type: "text", text: evocationScaffold(trick, problems) + foreignNote() }] };
   },
 );
 
@@ -433,7 +441,7 @@ server.registerTool(
     const fb = spark.forbids !== null ? `\nForbids: ${spark.forbids}` : "";
     const armed = spark.wakeCondition ? `\n${fmtWakeArmed(spark.wakeCondition)}` : "";
     return {
-      content: [{ type: "text", text: `Captured spark #${spark.id} on problem #${problemId}${pr}${ct}${co}.${fb}${armed}\nNext step: ${nextStep}` }],
+      content: [{ type: "text", text: `Captured spark #${spark.id} on problem #${problemId}${pr}${ct}${co}.${fb}${armed}\nNext step: ${nextStep}${foreignNote()}` }],
     };
   },
 );

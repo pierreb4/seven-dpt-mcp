@@ -190,12 +190,61 @@ function seededDB(): DB {
   return db;
 }
 
+// ---- Cross-session bookkeeping -------------------------------------------------------
+// Every Claude Code session runs its OWN copy of this server against ONE store.json, and
+// every operation is load -> mutate -> save with no lock. Two things follow, both handled
+// here rather than left to convention:
+//  (1) a lost update is possible if two sessions save inside the same few ms. save() refuses
+//      to overwrite a file whose mtime moved since load() — the caller gets a retryable error
+//      and nothing is written (StoreChangedError);
+//  (2) spark ids are allocated by whichever session saves first, so an id is unknowable
+//      until capture returns. load() notices when nextSparkId advanced beyond what THIS
+//      process last saw and parks a note the tool layer appends to its next reply
+//      (takeForeignSparkNote), so the session learns other sessions are writing.
+let loadedMtimeMs: number | null = null;
+let seenNextSparkId: number | null = null;
+let pendingForeign: { count: number; from: number; to: number } | null = null;
+
+export class StoreChangedError extends Error {
+  constructor() {
+    super(
+      "store.json changed on disk between read and write (another session saved) — nothing was written; retry the call once.",
+    );
+    this.name = "StoreChangedError";
+  }
+}
+
+/** Note about sparks another session captured since this process last read the store; cleared on read. */
+export function takeForeignSparkNote(): string | null {
+  const f = pendingForeign;
+  pendingForeign = null;
+  if (!f) return null;
+  const ids = f.count === 1 ? `#${f.from}` : `#${f.from}-#${f.to}`;
+  return `NOTE: ${f.count} spark(s) (${ids}) were captured by ANOTHER SESSION since this session last read the store — ids are assigned by the store at save time; never write a spark id into notes or memory before the capture reply returns it.`;
+}
+
+function noteForeign(db: DB): void {
+  if (seenNextSparkId !== null && db.nextSparkId > seenNextSparkId) {
+    const from = seenNextSparkId;
+    const to = db.nextSparkId - 1;
+    const count = to - from + 1;
+    pendingForeign = pendingForeign
+      ? { count: pendingForeign.count + count, from: Math.min(pendingForeign.from, from), to }
+      : { count, from, to };
+  }
+  seenNextSparkId = db.nextSparkId;
+}
+
 function load(): DB {
   const path = storePath();
   // Missing file = fresh install -> seeded. (A CORRUPT file below falls back to EMPTY,
   // not seeded: that is an incident to notice, not a fresh start to paper over.)
-  if (!existsSync(path)) return seededDB();
+  if (!existsSync(path)) {
+    loadedMtimeMs = null;
+    return seededDB();
+  }
   try {
+    loadedMtimeMs = statSync(path).mtimeMs;
     const db = JSON.parse(readFileSync(path, "utf8")) as Partial<DB>;
     const merged = { ...emptyDB(), ...db } as DB;
     // Backfill fields written before they existed.
@@ -216,6 +265,7 @@ function load(): DB {
       resolvedAt: s.resolvedAt ?? null,
       wakeCondition: s.wakeCondition ?? null,
     }));
+    noteForeign(merged);
     return merged;
   } catch {
     // Corrupt/partial file: start clean rather than crash the server.
@@ -226,9 +276,29 @@ function load(): DB {
 function save(db: DB): void {
   const path = storePath();
   mkdirSync(dirname(path), { recursive: true });
+  // Optimistic concurrency: if another session's rename landed since our load(), our db is
+  // stale and writing it would silently drop their change. Refuse; nothing is written.
+  if (existsSync(path)) {
+    const cur = statSync(path).mtimeMs;
+    if (loadedMtimeMs === null || cur !== loadedMtimeMs) throw new StoreChangedError();
+  }
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, JSON.stringify(db, null, 2), "utf8");
   renameSync(tmp, path); // atomic-ish swap so a crashed write can't truncate the store
+  loadedMtimeMs = statSync(path).mtimeMs;
+  seenNextSparkId = db.nextSparkId; // our own allocations are not "foreign"
+}
+
+/**
+ * The load -> mutate -> save unit every write in this file performs. Exported so the race
+ * guard can be exercised: anything fn does to the file on disk (as another session would)
+ * makes the following save() refuse with StoreChangedError.
+ */
+export function mutate<T>(fn: (db: DB) => T): T {
+  const db = load();
+  const out = fn(db);
+  save(db);
+  return out;
 }
 
 function now(): string {
