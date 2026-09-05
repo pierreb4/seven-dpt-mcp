@@ -96,7 +96,7 @@ function fmtProblem(p: Problem): string {
 
 // The theory lives here. evoke() returns this to the connected model so *it* runs
 // the loop — the server stores state and scaffolds, but never calls an LLM itself.
-function evocationScaffold(trick: string, problems: Problem[]): string {
+function evocationScaffold(trick: string, problems: Problem[], project?: string): string {
   const list = problems.length
     ? problems
         .map((p, i) => `${i + 1}. [#${p.id}] ${p.title}${p.statement ? ` — ${p.statement}` : ""}`)
@@ -108,6 +108,7 @@ function evocationScaffold(trick: string, problems: Problem[]): string {
     "(evocation -> transcendence -> approach motivation).",
     "",
     `STIMULUS (the new trick / result / observation):\n"${trick}"`,
+    ...(project ? [`WHERE YOU ARE: ${project} — tag any spark you capture with it, and weigh problems whose tags/origin name it.`] : []),
     "",
     `OPEN PROBLEMS — test the stimulus against EACH:\n${list}`,
     "",
@@ -380,9 +381,9 @@ server.registerTool(
       project: z.string().optional().describe("Optional: which project you're in right now"),
     },
   },
-  async ({ trick }) => {
+  async ({ trick, project }) => {
     const problems = listProblems(false);
-    return { content: [{ type: "text", text: evocationScaffold(trick, problems) + foreignNote() }] };
+    return { content: [{ type: "text", text: evocationScaffold(trick, problems, project) + foreignNote() }] };
   },
 );
 
@@ -468,6 +469,12 @@ server.registerTool(
         .enum(["pending", "tried", "worked", "failed"])
         .optional()
         .describe("New status for the spark"),
+      prior: z
+        .number()
+        .optional()
+        .describe(
+          "NOT accepted: the stated-at-capture credence is IMMUTABLE (the calibration audit compares it to the realized outcome, so a post-hoc revision is exactly the hindsight it exists to catch). Declared here only so a passed value is refused VISIBLY instead of being stripped in silence — the stored prior is kept.",
+        ),
       claimType: z
         .enum(["universal", "existential-bounded"])
         .optional()
@@ -510,7 +517,8 @@ server.registerTool(
         ),
     },
   },
-  async ({ id, outcome, status, claimType, forbids, exhaustion, costToOpen, cost, value, wakeCondition }) => {
+  async ({ id, outcome, status, prior, claimType, forbids, exhaustion, costToOpen, cost, value, wakeCondition }) => {
+    // `prior` never reaches the store (updateSpark does not take it) — it is destructured only to refuse it out loud.
     const spark = updateSpark({ id, outcome, status, claimType, forbids, exhaustion, costToOpen, cost, value, wakeCondition });
     if (!spark) return { content: [{ type: "text", text: `No spark #${id}.` }], isError: true };
     const bits = [`status=${spark.status}`];
@@ -521,10 +529,14 @@ server.registerTool(
       (f) => ({ claimType, forbids, exhaustion })[f] !== undefined && spark[f] !== ({ claimType, forbids, exhaustion })[f],
     );
     const kept = refused.length ? `\n(write-once: ${refused.join(", ")} already set — kept the original)` : "";
+    const priorNote =
+      prior !== undefined
+        ? `\n(prior is immutable — stated at capture as ${spark.prior ?? "unset"} and kept; update_spark never revises it)`
+        : "";
     const tail = spark.outcome ? `, outcome: ${spark.outcome}` : "";
     const armed =
       wakeCondition != null && spark.wakeCondition ? `\n${fmtWakeArmed(spark.wakeCondition)}` : "";
-    return { content: [{ type: "text", text: `Updated spark #${spark.id}: ${bits.join(", ")}${tail}${kept}${armed}` }] };
+    return { content: [{ type: "text", text: `Updated spark #${spark.id}: ${bits.join(", ")}${tail}${kept}${priorNote}${armed}` }] };
   },
 );
 

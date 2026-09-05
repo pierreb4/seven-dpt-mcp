@@ -89,11 +89,13 @@ resolved sparks (with cost + value, *including failures*) accrue, so the policy 
 precision. A companion, `analysis/reservation_value_bayes.py`, adds a posterior-predictive prior (so it
 can rank under sparse data) and models the one-time `costToOpen` against a compounding-but-saturating
 benefit stream — ranking by profitability index, which is invariant to the value↔cost exchange rate.
-`analysis/calibration.py` closes the loop on the `prior` field: it audits stated priors against realized
+`analysis/calibration.py` is the audit half of the `prior` loop: it scores stated priors against realized
 outcomes (reliability table, Brier/skill, drift check) from any two-line JSONL ledger of
 pre-registered priors + resolutions, and `--json` persists a de-bias map that
-`reservation_value_bayes.py` picks up — so the index runs on *calibrated* stated credences instead of a
-deemed hit-rate; `--split YYYY-MM-DD` partitions the curve at a changepoint (a model upgrade re-prices
+`reservation_value_bayes.py` reads *when run* — so the index can rank on *calibrated* stated credences
+instead of a deemed hit-rate. The loop is not closed by machinery: `calibration.py --json` runs inside
+`analysis/sweep_composite.sh`, but nothing invokes `reservation_value_bayes.py` and it ends in `print`;
+the last hop is a human choosing to run it and act on the ranking. `--split YYYY-MM-DD` partitions the curve at a changepoint (a model upgrade re-prices
 estimates — don't pool across one untested), and a scope stamp reports the claimType mix of scored pairs,
 since a frame-bounded null scored as a claim-failure is the one bias the audit can't see from numbers
 alone. `analysis/ledger_invariants.py` audits the *program* the same ledger records, not any
