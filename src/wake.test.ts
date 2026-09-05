@@ -308,6 +308,8 @@ test("--digest integration: WAKE block, unreadable block, ripening line with %",
           all: [{ signal: "fileLines", path: join(dir, "nope.txt"), gte: 5 }],
         },
       }),
+      // tried, ungraded, NO wake: the one the grade nag is for
+      mkSpark(4, { status: "tried" }),
     ],
   );
   const out = execFileSync(process.execPath, [INDEX_JS, "--digest"], {
@@ -320,6 +322,9 @@ test("--digest integration: WAKE block, unreadable block, ripening line with %",
   assert.match(out, /wake source unreadable — fix the aim:/);
   assert.match(out, /spark #3 .*nope\.txt → ENOENT/);
   assert.match(out, /ripening: spark #2 ledger\.jsonl 12\/20 \(60%\)/);
+  // spark #2 is tried + ungraded but PARKED behind a wake: the ripening line above is its
+  // report, and the grade nag must not ask for the verdict its gate withholds. #4 is the nag's.
+  assert.match(out, /1 spark\(s\) acted on but not yet graded \(#4\)/);
 });
 
 test("--wake integration: full ledger with atom echoes", () => {

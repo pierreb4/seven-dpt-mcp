@@ -323,10 +323,15 @@ export function getProblem(id: number): { problem: Problem; sparks: Spark[] } | 
 // channel left half-open. Surfaced in the ambient digest so they get closed out: an
 // ungraded outcome (especially an unlogged failure) is exactly what leaves problem #2's
 // spend-policy unlearnable, since every allocator method consumes this same cost/value history.
+// A spark that was acted on and has no value yet — UNLESS it is parked behind a wake.
+// A `tried` spark with an armed wakeCondition is waiting for its verdict (spark #59:
+// exposure-keyed, 0/8 lines, backstop 2026-11-01), and the wake block already reports it
+// every start; nagging "grade it" on top asks for the one thing its gate forbids, and
+// 2026-09-05 a sibling project's handoff sheet copied that nag as a to-do.
 export function sparksAwaitingGrade(): Spark[] {
   const db = load();
   return db.sparks
-    .filter((s) => s.value === null && s.status !== "pending")
+    .filter((s) => s.value === null && s.status !== "pending" && s.wakeCondition === null)
     .sort((a, b) => a.id - b.id);
 }
 
