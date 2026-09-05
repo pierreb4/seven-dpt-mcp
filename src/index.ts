@@ -188,15 +188,24 @@ function buildWakeBlocks(): string[] {
     blocks.push(`[seven-dpt] wake source unreadable — fix the aim:\n${lines.join("\n")}`);
   }
 
-  const ripening = entries
-    .filter((e) => e.readout.state === "ripening" && e.readout.progress !== null)
-    .slice(0, 3); // wakeLedger is already sorted by progress within the state
+  const allRipening = entries.filter(
+    (e) => e.readout.state === "ripening" && e.readout.progress !== null,
+  );
+  const ripening = allRipening.slice(0, 3); // wakeLedger is already sorted by progress within the state
   if (ripening.length > 0) {
     const bits = ripening.map((e) => {
       const pct = e.readout.progress! > 0 ? ` (${Math.round(e.readout.progress! * 100)}%)` : "";
       return `${wakeLabel(e)} ${e.readout.binding}${pct}`;
     });
-    blocks.push(`[seven-dpt] ripening: ${bits.join(" · ")}`);
+    // The rest stay named, ids only: a spark parked at 0% (#59, exposure-keyed, months
+    // out) fell off every digest once the grade nag stopped covering it — parked is not
+    // gone, and the digest is the only place a session sees the parked set without asking.
+    const rest = allRipening.slice(3);
+    const tail =
+      rest.length > 0
+        ? ` · +${rest.length} parked: ${rest.map(wakeLabel).join(" ")} (wake_status)`
+        : "";
+    blocks.push(`[seven-dpt] ripening: ${bits.join(" · ")}${tail}`);
   }
   return blocks;
 }

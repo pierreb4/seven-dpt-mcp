@@ -310,6 +310,10 @@ test("--digest integration: WAKE block, unreadable block, ripening line with %",
       }),
       // tried, ungraded, NO wake: the one the grade nag is for
       mkSpark(4, { status: "tried" }),
+      // three more ripening sparks, all behind #2's 60%: the line shows three, names the rest
+      mkSpark(5, { wakeCondition: { summary: "s5", all: [{ signal: "sparkCount", gte: 100 }] } }),
+      mkSpark(6, { wakeCondition: { summary: "s6", all: [{ signal: "sparkCount", gte: 200 }] } }),
+      mkSpark(7, { wakeCondition: { summary: "s7", all: [{ signal: "sparkCount", gte: 300 }] } }),
     ],
   );
   const out = execFileSync(process.execPath, [INDEX_JS, "--digest"], {
@@ -325,6 +329,8 @@ test("--digest integration: WAKE block, unreadable block, ripening line with %",
   // spark #2 is tried + ungraded but PARKED behind a wake: the ripening line above is its
   // report, and the grade nag must not ask for the verdict its gate withholds. #4 is the nag's.
   assert.match(out, /1 spark\(s\) acted on but not yet graded \(#4\)/);
+  // the fourth ripening entry is not dropped, it is named: parked is not gone
+  assert.match(out, /ripening: spark #2 .* · \+1 parked: spark #7 \(wake_status\)/);
 });
 
 test("--wake integration: full ledger with atom echoes", () => {
