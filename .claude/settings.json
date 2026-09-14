@@ -13,5 +13,6 @@
       }
     ]
   },
-  "effortLevel": "medium"
+  "effortLevel": "medium",
+  "maxEffortLevel": "medium"
 }
