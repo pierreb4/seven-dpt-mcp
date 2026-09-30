@@ -459,14 +459,14 @@ SELFTEST = [
 # The live control, kept OUT OF TREE: this repo has a public remote and arc's budget.py
 # carries spend and account detail the 2026-08-30 memory audit flagged. Scanned when
 # present so the strong frame still runs locally; silently absent on any other machine.
-LIVE_FP = os.path.expanduser("~/projects/arc-agi-3/scripts/budget.py")
+LIVE_FP = os.path.expanduser("~/.claude/scripts/budget.py")
 
 
 def selftest():
     caught = fp = 0
     frames = list(SELFTEST)
     if os.path.exists(LIVE_FP):
-        frames.append(("FP arc scripts/budget.py — the LIVE machine-stamped control"
+        frames.append(("FP ~/.claude/scripts/budget.py — the LIVE machine-stamped control"
                        " (out of tree)", LIVE_FP, "hand-stamped-ts", False, 0))
     total_want = sum(n for _, _, _, w, n in SELFTEST if w)
     print(f"REGISTER META-TEST — {total_want} banked incidents, each paired with its fix\n")
