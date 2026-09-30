@@ -1048,6 +1048,32 @@ def on_class(pre, noise):
     crit = crit_of(pre)
     return any((nz.get("unit") or "") in crit for nz in noise if nz.get("unit"))
 
+def merged_alert_lines(alerts):
+    """The PRINTED view of the alert list; `out["alerts"]` (the JSON) keeps one entry per
+    specimen. An alert reads `ALERT <class>: <head> — <tail>`, and the specimens of one class
+    usually share the tail (explanation and remedy): on 2026-09-30 nine undeclared event
+    values printed nine near-identical lines, eight kind tokens eight more, and the 28-line
+    block pushed a STANDING fact out of the sweep's `| tail -40` view. Specimens that share
+    (class, tail) print as ONE line with every head kept, in order; a lone specimen, or an
+    alert that does not split that way, prints exactly as before."""
+    groups = {}
+    for a in alerts:
+        m = re.match(r"ALERT ([a-z0-9-]+): (.*)", a, re.S)
+        if not m or "\n" in a or " — " not in m.group(2):
+            groups.setdefault((a, None), []).append(None)
+            continue
+        head, tail = m.group(2).split(" — ", 1)
+        groups.setdefault((m.group(1), tail), []).append(head)
+    lines = []
+    for (cls, tail), heads in groups.items():
+        if tail is None:
+            lines.extend([cls] * len(heads))
+        elif len(heads) == 1:
+            lines.append(f"ALERT {cls}: {heads[0]} — {tail}")
+        else:
+            lines.append(f"ALERT {cls}: ({len(heads)}) " + " · ".join(heads) + f" — {tail}")
+    return lines
+
 def main():
     argv = sys.argv[1:]
     asof = argv[argv.index("--asof") + 1] if "--asof" in argv else None
@@ -2417,24 +2443,24 @@ def main():
     out["alerts"] = alerts
     out["alert_claims"] = alert_claims
     print()
-    # Standing stop-rule state prints HERE, at the bottom next to the alerts, because the
-    # sweep view reads `| tail -40` and the FAMILY MIX section (where the trip prints) had
-    # scrolled above the window as the instrument face grew — a standing fact promised
-    # "printed every sweep" that prints where the view no longer reaches is not printed
-    # (2026-08-29; the same decay class the ts-disorder alert names: a view correlate
-    # quietly stopped covering the thing it was cut to show).
+    # Standing stop-rule state joins the collected STANDING block, which prints LAST. The
+    # sweep view reads `| tail -40`: on 2026-08-29 the trip was moved from the FAMILY MIX
+    # section down next to the alerts because it had scrolled above the window, and on
+    # 2026-09-30 the alerts below it had grown to 28 lines and put it 44 from the bottom —
+    # the same decay a second time, because "print it near the bottom" held only while
+    # nothing grew beneath it. A block that prints last cannot be outgrown.
     for tf in out.get("family_mix_stop_ruled") or []:
         _trip = next((c for c in out.get("family_mix_continue", [])
                       if c["family"] == tf and c.get("tripped")), {})
         _riders = [c["id"] for c in out.get("family_mix_continue", [])
                    if c["family"] == tf and not c.get("tripped") and "resolved" not in c]
-        print(f"STANDING stop-rule TRIPPED: family '{tf}' ('{_trip.get('id', '?')}' resolved"
+        standing.append(f"STANDING stop-rule TRIPPED: family '{tf}' ('{_trip.get('id', '?')}' resolved"
               f" {_trip.get('resolved', '?')})"
               + (f" · in-flight continue-reason heard: {', '.join(_riders)}"
                  if _riders else ""))
     _fa = out.get("future_ts_acknowledged") or []
     if _fa:
-        print(f"STANDING ts-correction: {len(_fa)} line(s) carry a +1-day nominal stamp, "
+        standing.append(f"STANDING ts-correction: {len(_fa)} line(s) carry a +1-day nominal stamp, "
               f"acknowledged on the ledger and NOT rewritten (append-only; file order and git "
               f"arrival carry authority) — lines "
               + ", ".join(str(r["line"]) for r in _fa)
@@ -2681,9 +2707,11 @@ def main():
             + ". Arc writes both the record and the lines that silence our tripwires, so this "
               "is the number that answers whether the alert set is shrinking because the "
               "RECORD improved or because it was ACKNOWLEDGED. Counted, not judged")
-    for _sl in standing: print(_sl)
-    for a in alerts: print(a)
+    # The bottom of this print IS the sweep's view: alerts merged per (class, tail), then
+    # every STANDING line, so no standing fact sits above a block that can grow (2026-09-30).
+    for a in merged_alert_lines(alerts): print(a)
     if not alerts: print("no alerts.")
+    for _sl in standing: print(_sl)
     if "--json" in argv:
         os.makedirs(os.path.dirname(OUTJSON), exist_ok=True)
         json.dump(out, open(OUTJSON, "w"), indent=1)
