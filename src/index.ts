@@ -8,6 +8,7 @@ import {
   evaluateWake,
   getProblem,
   listProblems,
+  priorCheck,
   sparksAwaitingGrade,
   storePath,
   updateProblem,
@@ -145,7 +146,46 @@ function buildDigest(): string {
     );
   }
   blocks.push(...buildWakeBlocks());
+  const priors = buildPriorLine();
+  if (priors) blocks.push(priors);
   return blocks.join("\n\n"); // "" when nothing to say — the print-nothing rule holds
+}
+
+// One line: stated priors against resolved outcomes. Below PRIOR_LINE_MIN resolved sparks the
+// interval is too wide to say anything, so the line waits; `--priors` lists every spark.
+const PRIOR_LINE_MIN = 10;
+
+function buildPriorLine(): string | null {
+  const c = priorCheck();
+  if (!c || c.n < PRIOR_LINE_MIN) return null;
+  const f = (x: number) => x.toFixed(2);
+  const reading =
+    c.meanPrior < c.lo
+      ? "priors run low (mean prior under the interval)"
+      : c.meanPrior > c.hi
+        ? "priors run high (mean prior over the interval)"
+        : "mean prior inside the interval";
+  return (
+    `[seven-dpt] priors vs outcomes: ${c.n} resolved sparks with a stated prior · mean prior ${f(c.meanPrior)}` +
+    ` · worked ${c.worked}/${c.n} = ${f(c.worked / c.n)} [${f(c.lo)}, ${f(c.hi)}] · value>0 ${c.valued}/${c.n}` +
+    ` — ${reading}; no map is applied to them. Per spark: --priors`
+  );
+}
+
+// Non-MCP CLI mode: `--priors` lists each resolved spark's stated prior beside its outcome.
+if (process.argv.includes("--priors")) {
+  const c = priorCheck();
+  if (!c) {
+    process.stdout.write("No resolved sparks with a stated prior.\n");
+  } else {
+    const lines = c.rows.map(
+      (s) =>
+        `#${s.id}: prior ${(s.prior as number).toFixed(2)} -> ${s.status} (value ${s.value})` +
+        `  ${(s.value ?? 0) > 0 ? "hit" : "miss"}`,
+    );
+    process.stdout.write(lines.join("\n") + "\n" + (buildPriorLine() ?? "") + "\n");
+  }
+  process.exit(0);
 }
 
 // The wake sections of the digest: ripe entries always, broken aims always, plus one

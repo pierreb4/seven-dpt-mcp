@@ -335,6 +335,49 @@ export function sparksAwaitingGrade(): Spark[] {
     .sort((a, b) => a.id - b.id);
 }
 
+// The stated `prior` held against how resolved sparks actually came out: the one cross-spark
+// view of prior beside value. analysis/calibration.py printed it on every sweep, into
+// /dev/null; the digest is where a session reads it. No de-bias map is applied to spark
+// priors: the map calibration.py fits comes from another program's ledger, and on this
+// store it has the wrong sign (priors run LOW here, 2026-10-10), so the check stays a
+// reading until the store's own resolved pool can carry a fit.
+export interface PriorCheck {
+  n: number;
+  meanPrior: number;
+  worked: number;
+  valued: number; // value > 0, which counts a `failed` spark that still paid something
+  lo: number; // Wilson 95% on worked/n
+  hi: number;
+  rows: Spark[];
+}
+
+function wilson(k: number, n: number, z = 1.96): [number, number] {
+  const p = k / n;
+  const d = 1 + (z * z) / n;
+  const c = (p + (z * z) / (2 * n)) / d;
+  const h = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d;
+  return [c - h, c + h];
+}
+
+export function priorCheck(): PriorCheck | null {
+  const rows = load()
+    .sparks.filter((s) => typeof s.prior === "number" && (s.status === "worked" || s.status === "failed"))
+    .sort((a, b) => a.id - b.id);
+  if (rows.length === 0) return null;
+  const n = rows.length;
+  const worked = rows.filter((s) => s.status === "worked").length;
+  const [lo, hi] = wilson(worked, n);
+  return {
+    n,
+    meanPrior: rows.reduce((t, s) => t + (s.prior as number), 0) / n,
+    worked,
+    valued: rows.filter((s) => (s.value ?? 0) > 0).length,
+    lo,
+    hi,
+    rows,
+  };
+}
+
 export function addProblem(input: {
   title: string;
   statement?: string;

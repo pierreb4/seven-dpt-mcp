@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { StoreChangedError, captureSpark, listProblems, mutate, takeForeignSparkNote, updateSpark } from "./store.js";
+import { StoreChangedError, captureSpark, listProblems, mutate, priorCheck, takeForeignSparkNote, updateSpark } from "./store.js";
 
 function scratchStore(): string {
   const dir = mkdtempSync(join(tmpdir(), "sevendpt-store-"));
@@ -76,4 +76,27 @@ test("a save over a store another process changed since our read is refused, not
   const r = updateSpark({ id: s.id, status: "tried", outcome: "x" });
   assert.ok(r);
   assert.equal(JSON.parse(readFileSync(path, "utf8")).sparks[0].status, "tried");
+});
+
+test("priorCheck counts only resolved sparks with a stated prior", () => {
+  const path = scratchStore();
+  const db = JSON.parse(readFileSync(path, "utf8"));
+  const spark = (id: number, prior: number | null, status: string, value: number | null) =>
+    ({ id, problemId: 1, trick: "t", idea: "i", nextStep: "n", outcome: null, status, prior, value, createdAt: "x", updatedAt: "x" });
+  db.sparks.push(
+    spark(1, 0.5, "worked", 2),
+    spark(2, 0.3, "failed", 1), // a failure that still paid: valued, not worked
+    spark(3, 0.4, "failed", 0),
+    spark(4, null, "worked", 2), // no prior: out
+    spark(5, 0.9, "tried", null), // unresolved: out
+  );
+  db.nextSparkId = 6;
+  writeFileSync(path, JSON.stringify(db));
+  const c = priorCheck();
+  assert.ok(c);
+  assert.deepEqual(c.rows.map((s) => s.id), [1, 2, 3]);
+  assert.equal(c.worked, 1);
+  assert.equal(c.valued, 2);
+  assert.ok(Math.abs(c.meanPrior - 0.4) < 1e-9);
+  assert.ok(c.lo < 1 / 3 && 1 / 3 < c.hi);
 });

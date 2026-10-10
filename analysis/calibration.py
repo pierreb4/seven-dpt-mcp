@@ -34,8 +34,11 @@ OUTPUT (text; at this n the binned table IS the reliability curve):
   7. era split           --split YYYY-MM-DD partitions by prereg ts (spark #31: a model upgrade
                          is a changepoint -- re-price, don't pool across it); per-era bias/skill/shift
 
---json writes the de-bias map for reservation_value_bayes.py to consume. It lands in the XDG
-data dir next to store.json (runtime-derived state, NOT repo content):
+--json writes the ledger's de-bias map and buckets, for self_check.py to hold against
+ledger_invariants. The map is the LEDGER's: nothing applies it to spark priors (its consumer,
+reservation_value_bayes.py, was retired 2026-10-10; on the store the shift has the other sign).
+The store's own prior-vs-outcome reading is in the digest (`--priors` lists it). It lands in
+the XDG data dir next to store.json (runtime-derived state, NOT repo content):
     ~/.local/share/seven-dpt/calibration.json          (env CALIBRATION_JSON overrides)
 
 Run:  python3 analysis/calibration.py [--json] [--split YYYY-MM-DD]
@@ -577,7 +580,7 @@ if SPLIT:
               f"  |  shift delta = {era_out['post']['shift'] - era_out['pre']['shift']:+.2f}"
               f"  -- at these n read as DIRECTION unless the era base-rate CIs are disjoint.")
 
-# ---- seven-dpt's own store (the eventual consumer; accrues too slowly to curve) ---------------
+# ---- seven-dpt's own store (accrues too slowly to curve; the digest prints this reading) ------
 try:
     d = json.load(open(STORE))
     own = [s for s in d.get("sparks", []) if isinstance(s.get("prior"), (int, float))
@@ -592,7 +595,7 @@ try:
 except FileNotFoundError:
     pass
 
-# ---- persist for reservation_value_bayes ------------------------------------------------------
+# ---- persist for self_check ------------------------------------------------------------------
 if "--json" in sys.argv:
     out = {"source": LEDGER, "n": n, "base_rate": round(base, 4), "mean_prior": round(mp, 4),
            "bias": round(bias, 4), "bias_inside_ci": inside, "brier": round(brier, 4),
@@ -622,4 +625,4 @@ if "--json" in sys.argv:
     os.makedirs(os.path.dirname(OUTJSON), exist_ok=True)
     json.dump(out, open(OUTJSON, "w"), indent=2)
     print("-" * 86)
-    print(f"  wrote {OUTJSON}  (consumed by reservation_value_bayes.py; intercept-only is the headline)")
+    print(f"  wrote {OUTJSON}  (read by self_check.py; the ledger's map, not applied to spark priors)")
