@@ -581,6 +581,23 @@ CONTROLS = [
         probe=lambda t, inv: any("PC-miscarried" in a for a in inv.get("alerts") or []),
     ),
     dict(
+        name="word-form `withdrawn` on a PRICED id leaves in-flight",
+        why="The shape of flashnext-m2-tput-b (ledger :936/:940, 2026-10-03): a priced probe, "
+            "then kind=resolution with outcome `withdrawn`. disposition() read it withdrawn "
+            "while pair() tested only the bare-`status` head, so the id read in-flight and "
+            "self_check's two-views check blocked every push from 10-03 to 10-13. The planted "
+            "lines copy :940's carrier fields, not a synthetic spelling.",
+        expect="pass",
+        plant=[{"ts": "2026-10-03T10:04:59Z", "id": "PC-wdword", "kind": "probe",
+                "prior": "0.45", "note": "synthetic control: priced probe"},
+               {"ts": "2026-10-03T22:04:20Z", "id": "PC-wdword", "kind": "resolution",
+                "amends": "PC-wdword", "outcome": "withdrawn",
+                "tag": "WITHDRAWN_DESIGN_UNSOUND_ON_QSA",
+                "status": "Design unsound for this model, found before any valid run"}],
+        probe=lambda t, inv: "PC-wdword" not in (inv.get("inflight_ids") or [])
+            and (inv.get("disposition") or {}).get("PC-wdword") == "withdrawn",
+    ),
+    dict(
         name="calibration word on a NEVER-REGISTERED id ALERTs",
         why="dialect-7-scope's load-bearing invariant: a verdict with no prior behind it "
             "grades nothing, so the line reads like a resolution and scores on no face.",

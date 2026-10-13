@@ -598,6 +598,17 @@ def status_class(l):
         if s.startswith(head): return cls
     return None
 
+def is_withdrawn(l):
+    """WITHDRAWN UNRUN in either dialect: the bare-`status` head (2026-08-14) OR the declared
+    word on a field (`withdrawn` joined OUTCOME_DECLARED 2026-08-31). Until 2026-10-13 pair()
+    tested status_class alone, which returns None on any line with an `outcome` — so
+    flashnext-m2-tput-b's {"kind":"resolution","outcome":"withdrawn"} (ledger :940, the first
+    PRICED id withdrawn in word form) was disposed 'withdrawn' by disposition() and read
+    in-flight by pair(), and self_check's two-views check went red. Callers test void and
+    declined first, so {"outcome":"void","result":"withdrawn"} stays void and
+    `withdrawn-at-adversary` stays declined."""
+    return status_class(l) == "withdrawn" or disposition(l)[1] == "withdrawn"
+
 # ── where does a declared name actually live? COMPUTED, never asserted ───────
 # Three alerts told the operator to "extend X in BOTH parsers". Two had gone stale: the
 # OUTCOME_DECLARED one within hours (calibration.py now imports it), and the KIND_TOKENS one
@@ -945,7 +956,7 @@ def pair(lines):
         elif any(is_declined(l) for l in ls):
             continue                                   # decided WITHOUT running: terminal, never
                                                        # scoreable, counted on its own DECLINED face
-        elif any(status_class(l) == "withdrawn" for l in ls):
+        elif any(is_withdrawn(l) for l in ls):
             continue                                   # WITHDRAWN UNRUN (2026-08-14): registered,
                                                        # never run, replaced by a redesign. Kept
                                                        # SEPARATE from declined on purpose — arc's

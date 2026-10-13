@@ -61,7 +61,7 @@ import json, math, os, re, sys
 # FACTS disagreeing, never two independently-typed word lists), so sharing the words costs it
 # nothing. self_check.py still imports NEITHER parser; that separation is untouched.
 # ledger_invariants has no import-time side effects and does not import this file (checked).
-from ledger_invariants import OUTCOME_DECLARED, TERMINAL, STATUS_HEADS
+from ledger_invariants import OUTCOME_DECLARED, TERMINAL, STATUS_HEADS, outcome_class
 
 DECLINED_WORDS = tuple(sorted((w for w, c in OUTCOME_DECLARED.items() if c == "declined"),
                               key=len, reverse=True))
@@ -215,6 +215,14 @@ def status_class(l):
         if s.startswith(head): return cls
     return None
 
+def is_withdrawn(l):
+    """Mirrors ledger_invariants.is_withdrawn (2026-10-13): the bare-`status` head OR the
+    declared word, classed by OUTCOME_DECLARED's own longest-prefix rule. Callers test void
+    and declined first, as there."""
+    return status_class(l) == "withdrawn" or \
+        any(w and outcome_class(str(w).strip()) == "withdrawn"
+            for w in (l.get("outcome"), l.get("resolution"), result_field(l)))
+
 def is_declined(l):
     """Mirrors ledger_invariants.OUTCOME_DECLARED['declined'] (option 4, 2026-08-12):
     decided WITHOUT running. Terminal and counted, but never scoreable — the run never
@@ -245,7 +253,7 @@ def last_disposition(ls):
         elif is_declined(l):                 d = "declined"
         elif is_void(l):                     d = "void"
         elif l.get("outcome") == "relabel":  d = "relabel"
-        elif status_class(l) == "withdrawn": d = "withdrawn"   # registered, never ran
+        elif is_withdrawn(l):                d = "withdrawn"   # registered, never ran
         elif is_split(l):                    d = "split"       # ran, answered several questions
     return d
 
@@ -391,7 +399,7 @@ for pid in order:
                                      # event-form GRAY* head to the word form too, so `gray` and
                                      # `inconclusive` land here rather than reading in-flight
                                      # forever and holding n back with them.
-    elif any(status_class(l) == "withdrawn" for l in lines):
+    elif any(is_withdrawn(l) for l in lines):
         withdrawn.append(pid)        # registered, never ran, superseded by a redesign
     elif any(l.get("outcome") == "amended-before-running" for l in outs): amended.append(pid)
     elif any(l.get("status") == "closed" or l.get("outcome") == "closed" for l in lines):
