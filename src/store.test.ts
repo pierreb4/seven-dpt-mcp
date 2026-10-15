@@ -100,3 +100,14 @@ test("priorCheck counts only resolved sparks with a stated prior", () => {
   assert.ok(Math.abs(c.meanPrior - 0.4) < 1e-9);
   assert.ok(c.lo < 1 / 3 && 1 / 3 < c.hi);
 });
+
+test("a fresh store seeds only the problems seven-dpt still has open", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sevendpt-store-"));
+  process.env.SEVEN_DPT_DB = join(dir, "store.json"); // no file yet: a fresh install
+  const seeded = listProblems(true);
+  assert.equal(seeded.length, 3, "README's 'three open product problems'");
+  assert.ok(seeded.every((p) => p.status === "open"));
+  const tags = seeded.flatMap((p) => p.tags ?? []);
+  assert.ok(!tags.includes("curation"), "the near-twelve cap is solved (addProblem refuses past it)");
+  assert.ok(!tags.includes("storage"), "storage graduation was retired");
+});

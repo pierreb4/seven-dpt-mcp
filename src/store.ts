@@ -136,7 +136,9 @@ function emptyDB(): DB {
 // its own method from the first run, and the ambient digest has something to show before
 // the user adds their own set. Tool-generic by design (identical for every install, about
 // the tool rather than the user); they are ordinary rows in the user's store — edit,
-// replace, or retire freely. An existing store is never touched.
+// replace, or retire freely. An existing store is never touched. Only problems the project
+// still has open ship: "keep the set near twelve" (solved 07-20 by addProblem's hard cap)
+// and "graduate storage to SQLite" (retired 07-20) were dropped.
 function seededDB(): DB {
   const db = emptyDB();
   const ts = now();
@@ -158,18 +160,6 @@ function seededDB(): DB {
       statement:
         "When new work touches an old problem, bring that problem's accumulated sparks into view unprompted — the right memory at the right moment.",
       tags: ["seven-dpt", "surfacing"],
-    },
-    {
-      title: "Keep the active set near twelve (retire / solve / merge)",
-      statement:
-        "Feynman kept ~a dozen so they stay live in mind. The cap is only advisory today; build/learn the retire-solve-merge loop that keeps the set sharp.",
-      tags: ["seven-dpt", "curation"],
-    },
-    {
-      title: "Graduate storage from JSON to SQLite + embedding-ranked evoke",
-      statement:
-        "The JSON store and model-side evoke matching are deliberate MVP choices; outgrow them when the spark history or problem set demands it.",
-      tags: ["seven-dpt", "storage"],
     },
   ];
   for (const s of seeds) {

@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /home/pierre/projects/atelier/handoff/announce.sh seven-dpt-mcp"
+            "command": "bash \"$HOME\"/projects/atelier/handoff/announce.sh seven-dpt-mcp"
           }
         ]
       }

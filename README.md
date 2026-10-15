@@ -66,9 +66,9 @@ die), and `calibration.py` stamps the claimType mix of every scored cohort.
 
 ## How it bootstraps
 
-On first run (no store file yet), the store **seeds itself with seven-dpt's own five open
-product problems** — auto-detection of recurring issues, the background-spend policy,
-proactive surfacing, keeping the set near twelve, and storage scaling. Design decision,
+On first run (no store file yet), the store **seeds itself with seven-dpt's own three open
+product problems** — auto-detection of recurring issues, the background-spend policy, and
+proactive surfacing. Design decision,
 made deliberately: the seeds are **tool-generic** (identical for every install, about the
 tool rather than about you), so the server dogfoods its own method from minute one and the
 ambient digest has something to show before you add your own problems. They are ordinary
@@ -145,7 +145,7 @@ session opens with your dormant problems in context:
 `/absolute/path/to/seven-dpt-mcp/dist/index.js --digest` — hooks don't source your shell
 profile, so nvm-style setups need the absolute path.)
 
-(`--digest` prints nothing when no problems are open; a fresh install prints the five
+(`--digest` prints nothing when no problems are open; a fresh install prints the three
 seeded ones — that's the bootstrap working, not noise.)
 
 ## Validate the idea

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# sweep_composite.sh — Option C (2026-08-08): the arc program's ledger is ONE logical
-# ledger in TWO files (arc-repo historical + shared-launch active since 08-07).
+# sweep_composite.sh — Option C (2026-08-08): the arc program's ledger was ONE logical
+# ledger in TWO files (arc-repo historical + shared-launch active since 08-07). Since
+# 2026-08-08T18:34 the shared path is a symlink to the arc-repo file, so on simone there is
+# one file: B is read and stamped only when it is not the same file as A (`-ef`).
 # Concatenate to a temp composite, run BOTH analysis layers on it via ARC_PRIOR_LEDGER
 # (the env var is the only path the scripts read — a positional arg is silently
 # ignored), and stamp provenance in a sidecar next to the self-persisted JSONs.
@@ -16,20 +18,25 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 COMPOSITE="$TMP/prior-ledger-composite.jsonl"
-# Exact-duplicate lines dedupe (first occurrence wins, order kept): since 2026-08-09
-# arc keeps the two files as synced copies, so a plain cat would double-read every id.
-# Diverged (non-identical) lines both survive, and per-id last-wins gives the later
-# file (B, the active one) precedence — correct in both worlds.
-awk '!seen[$0]++' "$A" "$B" > "$COMPOSITE"
+# A B that is A (the symlink) is one source, not two. A missing B still fails under set -e:
+# a source that vanished is an incident, not a reason to read less quietly.
+SOURCES=("$A")
+[ "$B" -ef "$A" ] || SOURCES+=("$B")
+# Exact-duplicate lines dedupe (first occurrence wins, order kept), for the case of two
+# real files kept as synced copies. Diverged (non-identical) lines both survive, and
+# per-id last-wins gives the later file (B, the active one) precedence.
+awk '!seen[$0]++' "${SOURCES[@]}" > "$COMPOSITE"
 
 mkdir -p "$OUTDIR"
-printf '{"scope":"composite","built":"%s","sources":[{"path":"%s","lines":%s,"sha1":"%s"},{"path":"%s","lines":%s,"sha1":"%s"}]}\n' \
-  "$(date -Is)" \
-  "$A" "$(wc -l < "$A")" "$(sha1sum "$A" | cut -c1-12)" \
-  "$B" "$(wc -l < "$B")" "$(sha1sum "$B" | cut -c1-12)" \
+STAMPS=()
+for f in "${SOURCES[@]}"; do
+  STAMPS+=("$(printf '{"path":"%s","lines":%s,"sha1":"%s"}' "$f" "$(wc -l < "$f" | tr -d ' ')" "$(sha1sum "$f" | cut -c1-12)")")
+done
+printf '{"scope":"composite","built":"%s","sources":[%s]}\n' \
+  "$(date -Is)" "$(IFS=,; echo "${STAMPS[*]}")" \
   > "$OUTDIR/ledger-sources.json"
 
-echo "== composite: $(wc -l < "$COMPOSITE") lines ($(basename "$A"): $(wc -l < "$A") + shared: $(wc -l < "$B"))"
+echo "== composite: $(wc -l < "$COMPOSITE") lines from ${#SOURCES[@]} source(s): ${SOURCES[*]}"
 echo "== calibration"
 ARC_PRIOR_LEDGER="$COMPOSITE" python3 "$HERE/calibration.py" --json "$@" >/dev/null
 echo "== invariants (STORE_STRICT=${STORE_STRICT:-1})"
@@ -47,7 +54,7 @@ SC_RC=$?
 # faces AGREE; this asks the prior question — whether any of them can say "no" at all. Two
 # faces that agree because neither can see the specimen are consistent and both wrong, which
 # is the pinned-green shape that cost this layer its most expensive bite. Planted specimens
-# through the real sweep path, so it costs one extra pass over 476 lines.
+# through the real sweep path, so it costs one extra pass over the ledger.
 # rc IS consulted (it joins self_check's rank): a reader that has lost the ability to dissent
 # has not published a number, it has published a silence.
 echo "== reader controls"
