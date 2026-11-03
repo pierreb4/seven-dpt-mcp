@@ -666,6 +666,62 @@ CONTROLS = [
 ]
 
 
+# ── kind-dialect-semantics-14 (arc ledger :1024, 2026-11-03; desk work/132) ──
+# One leg per word -14 declares, each a priced registration then a resolution whose carrier
+# holds the word, copying the shape of the live lines (:933 null, :976 kill, :941 occurred,
+# :907 passed, :903 learned, :582 ambiguous, :943 noisy). Before -14 was absorbed every leg
+# below was red: the word was undeclared, so the id read in-flight and the outcome-dialect
+# tripwire named it. The mention-only legs are the other half: `nullified` and `killed` hold
+# a declared word inside a longer word, and -14's head_read says that is not the word.
+def _d14(word, cls, field="outcome"):
+    pid = "PC-d14-" + "".join(ch if ch.isalnum() else "-" for ch in word.lower())[:24]
+    plant = [{"ts": "2026-11-03T10:00:00Z", "id": pid, "kind": "ab", "prior": 0.3,
+              "why": "synthetic control: priced arm"},
+             {"ts": "2026-11-03T10:01:00Z", "id": pid, "kind": "resolution", field: word}]
+    def gone(inv): return pid not in (inv.get("inflight_ids") or [])
+    def disp(inv): return (inv.get("disposition") or {}).get(pid)
+    def quiet(inv):   # no outcome-dialect alert names this word as undeclared
+        h = "'" + word.split()[0] + "'"
+        return not any(a.startswith("ALERT outcome-dialect") and h in a
+                       for a in inv.get("alerts") or [])
+    if cls == "verdict":
+        probe = lambda t, inv: gone(inv) and disp(inv) == "verdict" and quiet(inv)
+    elif cls == "nonscored":
+        probe = lambda t, inv: gone(inv) and disp(inv) == "nonscored" and quiet(inv)
+    elif cls == "annotation":   # never closes: the arm stays in-flight, and nothing alerts
+        probe = lambda t, inv: (not gone(inv)) and disp(inv) != "verdict" and quiet(inv)
+    else:                       # mention-only: a longer word is not the declared one, so it
+        # stays undeclared and the tripwire names it (without that clause `validated` passes
+        # under the old bare-prefix matcher too, since `valid` never closes an arm)
+        probe = lambda t, inv: (not gone(inv)) and disp(inv) != "verdict" and not quiet(inv)
+    return dict(name=f"-14 `{word}` on {field} reads {cls}",
+                why="kind-dialect-semantics-14 declares this head's genus; seven-dpt must "
+                    "read it the same way or the two readers disagree on the arm (desk "
+                    "work/132).", expect="pass", plant=plant, probe=probe)
+
+
+CONTROLS += [_d14(w, "verdict") for w in
+             ("null", "NULL -- not seen at MDE80 14.4", "kill", "occurred", "passed",
+              "passed-the-harm-gate", "learned")]
+CONTROLS += [_d14("null", "verdict", field="result")]
+CONTROLS += [_d14(w, "nonscored") for w in ("ambiguous", "noisy", "substrate-no", "parked")]
+CONTROLS += [_d14(w, "annotation") for w in
+             ("valid", "registered", "staged", "elected", "submitted", "running",
+              "PRE-RUN zero GPU spent", "pre-click")]
+CONTROLS += [_d14(w, "mention") for w in ("nullified", "killed", "validated")]
+CONTROLS += [dict(
+    name="-14 a later annotation line does not undecide an id",
+    why="kind-dialect-semantics-14's order: the LAST DECIDING line decides the id, and an "
+        "annotation never reopens it. final_cls took the last line of any class, so "
+        "ship-objrepairb-hidden (:59 failed, :61 correction) published `bookkeeping`.",
+    expect="pass",
+    plant=[{"ts": "2026-11-03T11:00:00Z", "id": "PC-d14-order", "kind": "ab", "prior": 0.3},
+           {"ts": "2026-11-03T11:01:00Z", "id": "PC-d14-order", "outcome": "failed"},
+           {"ts": "2026-11-03T11:02:00Z", "id": "PC-d14-order", "outcome": "correction",
+            "note": "synthetic: corrects the note above, not the verdict"}],
+    probe=lambda t, inv: (inv.get("disposition") or {}).get("PC-d14-order") == "verdict")]
+
+
 # ── vocabulary controls ─────────────────────────────────────────────────────
 # A different shape from the planted-specimen controls above: these assert a property of the
 # READERS THEMSELVES rather than of a ledger line, so they cannot be expressed as a plant.
@@ -724,6 +780,37 @@ line = {"id": "X", "outcome": probe}
 print(json.dumps({"inv": bool(L.is_declined(line)), "cal": bool(C.is_declined(line))}))
 """,
         probe=lambda r: r.get("inv") is True and r.get("cal") is True,
+    ),
+    dict(
+        name="-14 scoring words carry the declared y in BOTH parsers",
+        why="kind-dialect-semantics-14 (desk work/132): occurred/passed/learned score as "
+            "cleared, null/kill as failed, ambiguous/noisy/substrate-no are off the curve, and "
+            "a declared word inside a longer word (nullified, killed) is not that word. The "
+            "planted controls see only ledger_invariants' faces; calibration's y is invisible "
+            "to them, so this reads both verdict_of functions directly.",
+        code = """
+import sys, io, json, contextlib
+sys.path.insert(0, %r)
+import ledger_invariants as L
+with contextlib.redirect_stdout(io.StringIO()):
+    import calibration as C
+want = {"occurred": 1, "passed": 1, "passed-the-harm-gate": 1, "learned": 1, "cleared": 1,
+        "null": 0, "NULL -- not seen at MDE80 14.4": 0, "kill": 0, "failed": 0,
+        "refuted-by-run": 0, "nullified": None, "killed": None, "ambiguous": None,
+        "noisy": None, "substrate-no": None, "valid": None}
+inv = {1: "cleared", 0: "failed", None: None}
+bad = []
+for w, y in want.items():
+    line = {"id": "X", "kind": "resolution", "outcome": w}
+    if C.verdict_of(line) != y: bad.append(("cal", w, C.verdict_of(line)))
+    if inv[y] and L.verdict_of(line) != inv[y]: bad.append(("inv", w, L.verdict_of(line)))
+for w in ("ambiguous", "noisy", "substrate-no"):
+    line = {"id": "X", "kind": "resolution", "outcome": w}
+    if not C.is_nonscored(line): bad.append(("cal-nonscored", w))
+    if L.verdict_of(line) != "gray": bad.append(("inv-gray", w, L.verdict_of(line)))
+print(json.dumps({"bad": bad}))
+""",
+        probe=lambda r: r.get("bad") == [],
     ),
     dict(
         name="reader-path census names the known hidden gate",

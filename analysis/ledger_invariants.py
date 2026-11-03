@@ -131,10 +131,10 @@ def event_class(l):
     s = (l.get("status") or "").upper()
     if s.startswith("VOID") or "PREPUSH" in s: return "void"
     # GRAY head: declared kind-dialect-semantics-13 (2026-09-02), same class as the word-form.
-    # SUBSTRATE head: STILL UNDECLARED and a KNOWN LIVE DIVERGENCE — this line reads it
-    # terminal-nonscored, arc's flightcheck reads it as an unknown head and holds the arm
-    # open (specimen: colab-mtp-draw1, "SUBSTRATE-NO"). Deliberately left out of -13, whose
-    # scope was gray/inconclusive only; it needs its own decision, not a silent extension.
+    # SUBSTRATE head: declared kind-dialect-semantics-14 (2026-11-03) as `substrate-no`,
+    # parked_nonscored, so colab-mtp-draw1 ("SUBSTRATE-NO") now reads the same in both readers.
+    # This line still takes ANY SUBSTRATE-* head; -14 declares only -NO, so a SUBSTRATE-YES
+    # would read nonscored here and undeclared in arc's (a split recorded in desk work/132).
     if s.startswith("GRAY") or s.startswith("SUBSTRATE"): return "nonscored"
     if s.startswith("FAILED"): return "failed"
     if s.startswith("CLEARED"): return "cleared"
@@ -301,9 +301,35 @@ OUTCOME_DECLARED = {
     # (confirmed-on-a-priced-entry alert); a declaration whose legality condition nothing
     # tests is a comment, not a rule.
     "confirmed": "nonscored",
-    "protocol": "annotation", "parked": "annotation", "held": "annotation",
+    "protocol": "annotation", "held": "annotation",
     "stop": "annotation", "amended-before-resolution": "annotation",
     "progress": "in-progress",
+    # ── kind-dialect-semantics-14 (arc ledger :1024, 2026-11-03; desk work/132) ──
+    # Arc declared its disposition vocabulary WHOLE and now refuses, at write time, a registered
+    # arm's line that carries an undeclared word. These are the words -14 homes that this map
+    # lacked; each class is the one -14's `heads` gives it, so nothing here is this layer's
+    # interpretation. Before absorption 14 priced arms read in-flight on this side alone.
+    #   terminal_scores_as_cleared: the event the prior priced occurred (:941, :907, :903).
+    #   terminal_scores_as_failed: an M2 gate printed NULL / NO_ARM (8 arms, :933..:990) or a
+    #     PASS/KILL gate printed KILL (:976). -14: "not seen at MDE80 X", never "disproved",
+    #     and it expires with the instrument. It scores 0 like `failed`.
+    "occurred": "verdict", "passed": "verdict", "learned": "verdict",
+    "null": "verdict", "kill": "verdict",
+    #   parked_nonscored: a registered no-call branch (:582), a read that could not conclude
+    #     (:943), a substrate that could not host the question (:165, already nonscored here
+    #     as an event-form SUBSTRATE head). Same class as gray/inconclusive (-13).
+    #   `parked` moves from annotation to nonscored: -14 lists it terminal_nonscored, and the
+    #     vocabulary is arc's. Both live lines (:103, :146) are on unpriced ids, so no in-flight
+    #     or calibration count moves; a priced `parked` arm now closes instead of waiting on
+    #     its wake, as it does in arc's reader.
+    "ambiguous": "nonscored", "noisy": "nonscored", "substrate-no": "nonscored",
+    "parked": "nonscored",
+    #   annotation_never_closes: lifecycle words and any pre- compound mark an arm before its
+    #     verdict (PRE-CLICK, PRE-RUN, PRE-PUSH, PRE-JUDGMENT); `valid` says the read was valid
+    #     with the verdict on another carrier. `pre-` is a prefix key (see _PREFIX_KEYS).
+    "valid": "annotation", "registered": "annotation", "staged": "annotation",
+    "elected": "annotation", "submitted": "annotation", "running": "annotation",
+    "pre-": "annotation",
     # DECLINED (2026-08-12): decided WITHOUT running. Never scores — the run never
     # happened, so there is no ground truth to grade a prior against — but it is TERMINAL
     # and it is COUNTED. A ledger that records what it ran and not what it declined can
@@ -401,18 +427,45 @@ OUTCOME_DECLARED = {
     # and SHOULD alert. The rule itself lives in final_cls (last readable disposition wins).
 }
 
+# HOW A DECLARED WORD MATCHES (kind-dialect-semantics-14 head_read, 2026-11-03). "A declared
+# word inside a longer word is not that word (nullified is not null)." Until -14 every key
+# matched as a bare prefix, which was harmless only because no declared word was the start of
+# another English word on the ledger; `null`, `kill` and `valid` are (nullified, killed,
+# validated). So a key matches the whole word, or a prefix followed by a non-letter
+# (`passed-the-harm-gate`, `NULL -- not seen`, `failed-as-priced`). Replayed over every
+# carrier on the 1026-line ledger before the -14 words were added: no class moved.
+# _PREFIX_KEYS are the two wildcards -14 writes with a star, `gray*` and `pre-*`.
+_PREFIX_KEYS = ("gray", "pre-")
+
+def word_matches(lw, k):
+    """True when lowered carrier text `lw` is declared word `k` under -14's head_read."""
+    if not lw.startswith(k): return False
+    return len(lw) == len(k) or k in _PREFIX_KEYS or not lw[len(k)].isalpha()
+
+# THE SCORING DIRECTION, one map for both parsers (calibration.verdict_of reads it too, so a
+# word absorbed here gets its y everywhere at once). y=1 for the words -14 files under
+# terminal_scores_as_cleared, y=0 for terminal_scores_as_failed plus `refuted-by-run`
+# (2026-08-13, ran-and-lost; seven-dpt's word, not yet in -14 -- see desk work/132).
+VERDICT_Y = {"cleared": 1, "occurred": 1, "passed": 1, "learned": 1,
+             "failed": 0, "refuted-by-run": 0, "null": 0, "kill": 0}
+_VERDICT_ORDER = sorted(VERDICT_Y, key=len, reverse=True)
+
+def verdict_y(w):
+    """1 / 0 for a carrier that holds a scoring word, else None."""
+    lw = str(w).strip().lower()
+    for k in _VERDICT_ORDER:
+        if word_matches(lw, k): return VERDICT_Y[k]
+    return None
+
 # Words that carry a scoreable verdict, checked against BOTH fields (see verdict_of).
 def _verdict_word(w):
-    lw = str(w).lower()
-    if lw.startswith("cleared"): return "cleared"
-    if lw.startswith(("failed", "refuted-by-run")): return "failed"
-    return None
+    return {1: "cleared", 0: "failed"}.get(verdict_y(w))
 _DECL_ORDER = sorted(OUTCOME_DECLARED, key=len, reverse=True)   # longest prefix wins
 
 def outcome_class(w):
     lw = w.lower()
     for k in _DECL_ORDER:
-        if lw.startswith(k): return OUTCOME_DECLARED[k]
+        if word_matches(lw, k): return OUTCOME_DECLARED[k]
     return "NEW"
 
 # VERDICT + REASON (arc convention, first seen 2026-08-12). A resolution line may now carry
@@ -1237,6 +1290,13 @@ def main():
     # face would then read live families as stalled ones.
     _EV_CLS = {"cleared": "verdict", "failed": "verdict", "void": "void",
                "nonscored": "nonscored"}
+    # kind-dialect-semantics-14 (2026-11-03): "annotation heads and undeclared heads never
+    # decide, so they never reopen an id" -- the last DECIDING line wins. Before desk work/132 a
+    # later annotation-class line overwrote a verdict here: ship-objrepairb-hidden (:59 failed,
+    # :61 correction) and repeatnote-draw1 (:133 void, :134 correction) published `bookkeeping`.
+    # pair() and calibration already bucketed both right; only this map was wrong. An id with
+    # no deciding line still publishes its last annotation class, as before.
+    _NON_DECIDING = ("annotation", "in-progress", "bookkeeping")
     final_cls = {}
     for l in lines:
         pid = l.get("id")
@@ -1246,7 +1306,9 @@ def main():
             c = _EV_CLS.get(event_class(l) or "", "NEW")
         if c == "NEW":
             c = status_class(l) or "NEW"    # third channel: bare-status terminals (WITHDRAWN)
-        if c != "NEW": final_cls[pid] = c
+        if c == "NEW": continue
+        if c in _NON_DECIDING and final_cls.get(pid) not in (None,) + _NON_DECIDING: continue
+        final_cls[pid] = c
     out["disposition"] = final_cls      # published so self_check can hold this view against
                                         # pair()'s: on 08-13 they disagreed about tr87-lens-
                                         # ceiling (cleared here, in-flight there) and nothing
@@ -1767,7 +1829,8 @@ def main():
     #   specimens, so the alert is about the NEXT one.
     # Acknowledged-specimen discipline applies (as on the unpriced-draw face): an id named on
     # a kind-dialect-semantics line prints STANDING; only fresh specimens ALERT.
-    CAL_SCORING = ("cleared", "failed")
+    # The scoring words are VERDICT_Y's, not a literal pair: -14 keeps -7-scope's legality for
+    # its new calibration words ("these words only on registered ids"), desk work/132.
     genus_viol = []
     for n, l in enumerate(lines):
         i = l.get("id")
@@ -1776,7 +1839,7 @@ def main():
             if f == "result" and result_field(l) is None: continue
             w = str(l.get(f) or "").strip().lower()
             head = w.split()[0].strip(".,;:—-*") if w else ""
-            if head.startswith(CAL_SCORING):
+            if verdict_y(head) is not None:
                 genus_viol.append({"id": i, "field": f, "word": head, "line": n + 1})
                 break
     out["genus_registration_violations"] = genus_viol

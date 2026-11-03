@@ -61,7 +61,8 @@ import json, math, os, re, sys
 # FACTS disagreeing, never two independently-typed word lists), so sharing the words costs it
 # nothing. self_check.py still imports NEITHER parser; that separation is untouched.
 # ledger_invariants has no import-time side effects and does not import this file (checked).
-from ledger_invariants import OUTCOME_DECLARED, TERMINAL, STATUS_HEADS, outcome_class
+from ledger_invariants import (OUTCOME_DECLARED, TERMINAL, STATUS_HEADS, outcome_class,
+                               verdict_y, word_matches)
 
 DECLINED_WORDS = tuple(sorted((w for w, c in OUTCOME_DECLARED.items() if c == "declined"),
                               key=len, reverse=True))
@@ -137,10 +138,13 @@ def verdict_of(l):
     # threshold"} — a cleared bet silently off the curve. `refuted-by-run` is arc's token for
     # ran-and-lost, minted so a completed negative is not filed as a walk-away.
     # result_field: third carrier, kind=resolution lines only (2026-08-18).
+    # The words and their y are ledger_invariants.VERDICT_Y since kind-dialect-semantics-14
+    # (desk work/132): occurred/passed/learned score 1, null/kill score 0, and -14's head_read
+    # (nullified is not null) is word_matches'. Shared, not re-listed: the literal pair this
+    # replaced is the drift the 2026-08-31 note above describes.
     for w in (l.get("outcome"), l.get("resolution"), result_field(l)):
-        lw = str(w or "").lower()
-        if lw.startswith("cleared"): return 1
-        if lw.startswith(("failed", "refuted-by-run")): return 0
+        y = verdict_y(w) if w else None
+        if y is not None: return y
     if l.get("status") == "closed":
         head = ((l.get("result") or "").split() or [""])[0].strip(".,;:—-*")
         return _HEADS.get(head)
@@ -159,14 +163,17 @@ def is_void(l):
 # eb6c276) — terminal, and non-scored precisely so a non-adjudication cannot enter this
 # curve as a verdict. Keeping the OFF-CURVE half in the declaration was the point: folding
 # gray into "resolved" generally would push a run with no ground truth into the Brier lane.
-NONSCORED_WORDS = ("gray", "inconclusive", "ran-and-grayed", "ran-and-inconclusive",
-                   # `confirmed` (kind-dialect-semantics-4, 2026-08-30): fact established,
-                   # never scored. Legal ONLY on an unpriced entry, so on a well-formed
-                   # ledger it never reaches a scoring branch at all; listing it here makes
-                   # the ILLEGAL case (confirmed on a priced entry) fail safe — filed
-                   # terminal-but-unscored instead of silently read as a verdict — while
-                   # ledger_invariants raises the alert that gets it fixed.
-                   "confirmed")
+# `confirmed` (kind-dialect-semantics-4, 2026-08-30): fact established, never scored. Legal
+# ONLY on an unpriced entry, so on a well-formed ledger it never reaches a scoring branch at
+# all; listing it here makes the ILLEGAL case (confirmed on a priced entry) fail safe — filed
+# terminal-but-unscored instead of silently read as a verdict — while ledger_invariants raises
+# the alert that gets it fixed.
+# DERIVED since kind-dialect-semantics-14 (desk work/132): every word OUTCOME_DECLARED classes
+# `nonscored` (gray, inconclusive, their ran-and- forms, confirmed, and -14's ambiguous, noisy,
+# substrate-no, parked). The literal tuple it replaces would have kept -14's three in flight
+# here while ledger_invariants closed them, and self_check's in-flight agreement would go red.
+NONSCORED_WORDS = tuple(sorted((w for w, c in OUTCOME_DECLARED.items() if c == "nonscored"),
+                               key=len, reverse=True))
 
 def is_nonscored(l):
     """THE MIDDLE WORLD in word form (2026-08-14). Mirrors
@@ -181,7 +188,7 @@ def is_nonscored(l):
     attempted three times); HERE verdict_of must keep returning None so it never reaches
     `resolved`. Same word, two correct answers, because the two files measure different
     things."""
-    return any(str(w or "").lower().startswith(NONSCORED_WORDS)
+    return any(word_matches(str(w or "").strip().lower(), k) for k in NONSCORED_WORDS
                for w in (l.get("outcome"), l.get("resolution"), result_field(l))) \
         or event_class(l) == "nonscored"
 
