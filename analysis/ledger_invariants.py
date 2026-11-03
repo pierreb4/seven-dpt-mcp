@@ -113,11 +113,23 @@ CI = re.compile(r"\[\s*(-?\d+(?:\.\d+)?)\s*,\s*\+?(-?\d+(?:\.\d+)?)\s*\]")
 # v1: two lines/probe — {prior, criterion} then {outcome, note}.
 # v2 (2026-08-05..): {kind, status, prior_p_<target>, why, result}; desk items born-and-closed
 # in one line; verdict = explicit outcome word OR the result's leading word (strict whitelist).
+def registers_prior(v):
+    """kind-dialect-semantics-14 prior_type (2026-11-03): a prior is a number, a numeric
+    string ('0.15', :630/:935/:936/:958/:959) or absent; JSON null, a bool and any other
+    string register nothing. The live case is the string 'None' on :755-757 (two void notes
+    and a withdrawal), which held three scribe arms in flight here and in no arc reader
+    (desk work/132). Mirrors arc's flightcheck.prior_value; returns v itself, not a float,
+    so callers that float() it later are unchanged."""
+    if v is None or isinstance(v, bool): return None
+    try: float(v)
+    except (TypeError, ValueError): return None
+    return v
+
 def prior_of(l):
-    if "prior" in l: return l["prior"]
+    if "prior" in l: return registers_prior(l["prior"])
     for k in l:
-        if k.startswith("prior_p_"): return l[k]
-        if k.startswith("p_") and not k.endswith("_was"): return l[k]   # v3 (see calibration.py)
+        if k.startswith("prior_p_"): return registers_prior(l[k])
+        if k.startswith("p_") and not k.endswith("_was"): return registers_prior(l[k])   # v3 (see calibration.py)
     return None
 
 def event_class(l):
@@ -219,6 +231,10 @@ EVENT_TOKENS = {
     "causal-premise-tested-free", "REGISTRATION (single-game design)",
     # restatement events — the carriers bite 7 and today's kind fix both turn on.
     "head-restatement", "kind-restatement",
+    # kind-dialect-semantics-14 (2026-11-03, desk work/132): `running` is annotation_never_closes
+    # there. It is on 11 ids' event lines (hidden draws mid-run); it already read `ignore`, so
+    # declaring it moves no count and only ends the event-dialect alert's mention of it.
+    "running",
 }
 
 _HEADS = {"CLEARED": "cleared", "FAILED": "failed", "DEAD": "failed", "KILLED": "failed"}

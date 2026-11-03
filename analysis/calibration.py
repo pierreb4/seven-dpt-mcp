@@ -62,7 +62,7 @@ import json, math, os, re, sys
 # nothing. self_check.py still imports NEITHER parser; that separation is untouched.
 # ledger_invariants has no import-time side effects and does not import this file (checked).
 from ledger_invariants import (OUTCOME_DECLARED, TERMINAL, STATUS_HEADS, outcome_class,
-                               verdict_y, word_matches)
+                               verdict_y, word_matches, registers_prior)
 
 DECLINED_WORDS = tuple(sorted((w for w, c in OUTCOME_DECLARED.items() if c == "declined"),
                               key=len, reverse=True))
@@ -92,8 +92,10 @@ def sigmoid(x): return 1.0 / (1.0 + math.exp(-x))
 # v3 (2026-08-07.., shared-launch file): prereg carries the prior as a bare `p_<target>` key
 #                         and `date` instead of `ts`; resolutions are `resolution: <word>` lines
 #                         echoing the prior as `p_*_was` (never a prior source). Scored words:
-#                         cleared/failed only; `void*` → void; held/stop/parked stay non-terminal
-#                         (parked-with-wake reads as in-flight — the wake owns reopening).
+#                         cleared/failed only; `void*` → void; held/stop stay non-terminal.
+#                         `parked` was non-terminal here too (parked-with-wake read in-flight)
+#                         until kind-dialect-semantics-14 filed it terminal_nonscored
+#                         (2026-11-03, desk work/132): it now closes off the curve.
 # v3.1 (2026-08-08.., absorbed 2026-08-11): event lines. {"event":"resolution","status":<WORD>}
 #                         is the verdict channel; the status HEAD maps: FAILED*→0, CLEARED*→1,
 #                         VOID*/*PREPUSH*→void, GRAY*→terminal-non-scored (pre-declared power
@@ -118,10 +120,12 @@ def event_class(l):
     return "unknown"
 
 def prior_of(l):
-    if "prior" in l: return l["prior"]
+    # registers_prior: -14's prior_type (the string 'None' registers nothing), shared with
+    # ledger_invariants so the two readers agree on what a registration is (desk work/132).
+    if "prior" in l: return registers_prior(l["prior"])
     for k in l:
-        if k.startswith("prior_p_"): return l[k]
-        if k.startswith("p_") and not k.endswith("_was"): return l[k]
+        if k.startswith("prior_p_"): return registers_prior(l[k])
+        if k.startswith("p_") and not k.endswith("_was"): return registers_prior(l[k])
     return None
 
 _HEADS = {"CLEARED": 1, "FAILED": 0, "DEAD": 0, "KILLED": 0}

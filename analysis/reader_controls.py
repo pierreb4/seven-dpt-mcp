@@ -720,6 +720,24 @@ CONTROLS += [dict(
            {"ts": "2026-11-03T11:02:00Z", "id": "PC-d14-order", "outcome": "correction",
             "note": "synthetic: corrects the note above, not the verdict"}],
     probe=lambda t, inv: (inv.get("disposition") or {}).get("PC-d14-order") == "verdict")]
+CONTROLS += [dict(
+    name="-14 the string 'None' as a prior registers nothing",
+    why="kind-dialect-semantics-14 prior_type: 'the string None (lines 755-757) reads as "
+        "absent, so those lines register nothing'. seven-dpt read it as a prior, so the three "
+        "scribe arms of :755-757 sat in flight here and nowhere in arc's reader. The plant "
+        "copies :757's carrier fields.",
+    expect="pass",
+    plant=[{"ts": "2026-11-03T11:10:00Z", "id": "PC-d14-nonestr", "kind": "note",
+            "event": "withdrawn-at-premise", "prior": "None"}],
+    probe=lambda t, inv: "PC-d14-nonestr" not in (inv.get("inflight_ids") or []))]
+CONTROLS += [dict(
+    name="-14 `running` as an event value is a declared annotation",
+    why="-14 files `running` under annotation_never_closes. Arriving as an `event` value "
+        "(11 live ids) it already read `ignore`, but by accident: the event-dialect tripwire "
+        "named it as undeclared until EVENT_TOKENS declared it (desk work/132).",
+    expect="pass",
+    plant=[{"ts": "2026-11-03T11:20:00Z", "id": "PC-d14-ev-running", "event": "running"}],
+    probe=lambda t, inv: not any("PC-d14-ev-running" in a for a in inv.get("alerts") or []))]
 
 
 # ── vocabulary controls ─────────────────────────────────────────────────────
