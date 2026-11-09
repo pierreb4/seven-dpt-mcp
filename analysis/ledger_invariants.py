@@ -11,7 +11,8 @@ Reads the same two-line JSONL ledger as calibration.py (pre-registration lines c
 `prior`, resolution lines carrying `outcome`) and checks three program-level invariants:
 
   PARK-STREAK   K consecutive terminal verdicts whose notes read "inside the noise"
-                (CI straddling zero, under the bar, indistinguishable). A long streak means
+                (CI straddling zero, under the bar, indistinguishable), or whose head is
+                -14's `null` or `kill` ("not seen at MDE80 X"). A long streak means
                 the instrument, not the ideas, is the binding constraint. ALERT at >= STREAK_K.
   POWER         a pre-registration whose gate (explicit `gate` field, else the smallest
                 effect magnitude parsed near the unit in `criterion`) is below the banked
@@ -980,7 +981,19 @@ def result_field(l):
 def crit_of(pre):
     return pre.get("criterion") or pre.get("why") or ""
 
-def classify(outcome, note):
+# -14's sub-MDE heads (desk work/151): "null: an M2 gate printed NULL ... its closure reads
+# 'not seen at MDE80 X', never 'disproved'", and kill "the same for a PASS/KILL gate". Both
+# score as failed, so verdict_of has already collapsed them by the time PARK-STREAK asks;
+# verdict_head hands the face the word itself, from the carrier verdict_of's loop would use.
+SUB_MDE_HEADS = ("null", "kill")
+
+def verdict_head(l):
+    """The carrier holding the line's scoring word, lowered; None when none holds one."""
+    for w in (l.get("outcome"), l.get("resolution"), result_field(l)):
+        if w and _verdict_word(w): return str(w).strip().lower()
+    return None
+
+def classify(outcome, note, head=None):
     if outcome == "relabel": return "inside_noise"    # the relabel convention (2026-08-02) IS a
                                                       # re-grade to NULL-EQUIVALENT — by construction
     t = (note or "").replace("−", "-").replace("–", "-")
@@ -988,6 +1001,9 @@ def classify(outcome, note):
                                                       # checked BEFORE the decisive regex (spark #35:
                                                       # ksearch's KILL-leg prose read as decisive and
                                                       # broke a streak the program itself calls a wall)
+    # Only a `failed` verdict: an event line whose status CLEARED wins over a stray carrier.
+    if outcome == "failed" and head and any(word_matches(head, k) for k in SUB_MDE_HEADS):
+        return "inside_noise"
     if DECISIVE.search(t): return "decisive"          # a refutation is information — breaks a streak
     m = CI.search(t)
     if m and float(m.group(1)) <= 0 <= float(m.group(2)): return "inside_noise"
@@ -1189,7 +1205,7 @@ def main():
     # ── PARK-STREAK ──
     pool = [r for r in resolved if on_class(r["pre"], noise)] if noise else resolved
     off_class = len(resolved) - len(pool)
-    seq = [(r["id"], classify(verdict_of(r["res"]) or r["res"].get("outcome"), r["res"].get("note") or r["res"].get("result") or r["res"].get("observed")), r["res"].get("ts") or r["res"].get("date", "")) for r in pool]
+    seq = [(r["id"], classify(verdict_of(r["res"]) or r["res"].get("outcome"), r["res"].get("note") or r["res"].get("result") or r["res"].get("observed"), head=verdict_head(r["res"])), r["res"].get("ts") or r["res"].get("date", "")) for r in pool]
     unclassified = [i for i, c, _ in seq if c == "unclassified"]
     classified = [(i, c, t) for i, c, t in seq if c != "unclassified"]
     cur, cur_ids = 0, []

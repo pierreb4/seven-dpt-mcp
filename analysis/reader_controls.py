@@ -709,6 +709,66 @@ CONTROLS += [_d14(w, "annotation") for w in
              ("valid", "registered", "staged", "elected", "submitted", "running",
               "PRE-RUN zero GPU spent", "pre-click")]
 CONTROLS += [_d14(w, "mention") for w in ("nullified", "killed", "validated")]
+
+
+# -14 ON PARK-STREAK (desk work/151). -14 declares null and kill as "not seen at MDE80 X,
+# never disproved": a terminal sub-MDE reading, which is what the streak counts. verdict_of
+# collapses both to `failed`, so the face has to be handed the word itself. The streak face
+# publishes only its timeline, one letter an arm, so each leg plants a DECISIVE sentinel first
+# and asserts on the last letters: without it `endswith("N")` could be read off the live
+# ledger's own last arm, or pass with the plant silently off-class.
+_PK_T = "2026-11-03T1%d:%02d:00Z"
+
+def _pk_arm(pid, n, res):
+    return [{"ts": _PK_T % (1, n * 2), "id": pid, "kind": "ab", "prior": 0.3,
+             "why": "synthetic control: priced arm"},
+            {"ts": _PK_T % (1, n * 2 + 1), "id": pid, "kind": "resolution", **res}]
+
+def _pk(tag, res, want):
+    pid = "PC-pk-" + tag
+    plant = _pk_arm(pid + "-sentinel", 0, {"outcome": "cleared"}) + _pk_arm(pid, 1, res)
+    tail = "D" + want
+    def probe(t, inv):
+        return ((inv.get("streak") or {}).get("timeline") or "").endswith(tail)
+    return dict(name=f"-14 PARK-STREAK {tag}: {sorted(res.items())} reads {want}",
+                why="kind-dialect-semantics-14: null and kill are sub-MDE terminals, inside-noise "
+                    "on this face; a declared word inside a longer word, a mention in a note, or "
+                    "a verdict taken from another carrier is not that head (desk work/151).",
+                expect="pass", plant=plant, probe=probe)
+
+
+REFUTING = "refuted at the priced bar, wrong direction"   # DECISIVE matches this
+CONTROLS += [
+    _pk("null", {"outcome": "null"}, "N"),
+    _pk("kill", {"outcome": "kill"}, "N"),
+    _pk("null-long", {"outcome": "NULL -- not seen at MDE80 14.4"}, "N"),
+    _pk("null-result", {"result": "null"}, "N"),
+    # The order is spark #35's: the head is tested before DECISIVE reads the prose.
+    _pk("null-decisive-note", {"outcome": "null", "note": REFUTING}, "N"),
+    _pk("kill-decisive-note", {"outcome": "kill", "note": REFUTING}, "N"),
+    # Mention legs: each reaches classify with a `failed` verdict and a null/kill in sight.
+    _pk("nullified", {"resolution": "failed", "outcome": "nullified"}, "?"),
+    _pk("killed", {"resolution": "failed", "outcome": "killed"}, "?"),
+    _pk("failed-note-null", {"outcome": "failed", "note": "a null arm, kill it"}, "?"),
+    _pk("failed-plain", {"outcome": "failed"}, "?"),
+    # verdict_of's carrier order: the verdict came from `outcome`, so `resolution` is reason.
+    _pk("cleared-over-null", {"outcome": "cleared", "resolution": "null"}, "D"),
+    # event_class runs before the carriers: a CLEARED status is the verdict, whatever `outcome` says.
+    _pk("event-cleared-over-null",
+        {"event": "resolution", "status": "CLEARED at the gate", "outcome": "null"}, "D"),
+]
+CONTROLS += [dict(
+    name="-14 PARK-STREAK: six null/kill arms in a row fire the alert",
+    why="the face's point: a run of sub-MDE M2 arms on one instrument shows as a streak and "
+        "alerts at STREAK_K (default 6). The sentinel holds the count to the planted arms.",
+    expect="pass",
+    plant=_pk_arm("PC-pk-run-sentinel", 0, {"outcome": "cleared"})
+          + [l for n, w in enumerate(("null", "kill", "null", "kill", "null", "null"), 1)
+             for l in _pk_arm(f"PC-pk-run-{n}", n, {"outcome": w})],
+    probe=lambda t, inv: (inv.get("streak") or {}).get("current") == 6
+                         and any(a.startswith("ALERT park-streak: 6 consecutive")
+                                 for a in inv.get("alerts") or []),
+)]
 CONTROLS += [dict(
     name="-14 a later annotation line does not undecide an id",
     why="kind-dialect-semantics-14's order: the LAST DECIDING line decides the id, and an "
